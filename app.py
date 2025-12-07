@@ -6,7 +6,7 @@ from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 
 # === CONFIGURATION ===
-API_KEY = "AIzaSyDkaqLK6OSLw8YS5udevA5mKJTAsbTfiz0" 
+API_KEY = st.secrets["GEMINI_API_KEY"]
 
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('models/gemini-flash-latest')
