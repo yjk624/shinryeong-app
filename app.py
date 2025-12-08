@@ -8,64 +8,45 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 
 # ==========================================
-# 1. AUTO-DISCOVERY MODEL LOADER
+# 1. BRUTE FORCE MODEL LOADER
 # ==========================================
-def configure_and_find_model(api_key):
-    """
-    Asks Google: 'What models do I have?' and picks the best 1.5-Flash version.
-    """
+def get_working_model(api_key):
     genai.configure(api_key=api_key)
     
-    found_model_name = None
+    # We strictly avoid "latest" because it triggers the 2.5/Quota trap.
+    # We try the standard stable names.
+    candidates = [
+        "gemini-1.5-flash",
+        "models/gemini-1.5-flash",
+        "gemini-1.5-flash-001",
+        "gemini-pro",
+        "models/gemini-pro"
+    ]
     
-    try:
-        # 1. Get list of all available models for this Key
-        all_models = list(genai.list_models())
-        
-        # 2. Strategy: Find '1.5-flash' but NOT 'latest' (to avoid 2.5 quota trap)
-        # We prefer '001' or '002' specific versions.
-        priority_keywords = ['1.5-flash-002', '1.5-flash-001', '1.5-flash']
-        
-        for keyword in priority_keywords:
-            for m in all_models:
-                if keyword in m.name and 'latest' not in m.name:
-                    if 'generateContent' in m.supported_generation_methods:
-                        found_model_name = m.name
-                        break
-            if found_model_name: break
+    for model_name in candidates:
+        try:
+            # Create model
+            model = genai.GenerativeModel(model_name)
+            # FORCE a test call. If this line works, the model is valid.
+            model.generate_content("test")
+            return model
+        except Exception:
+            # If it fails (404, 403, etc), silently try the next one
+            continue
             
-        # 3. Fallback: If no Flash, look for Pro
-        if not found_model_name:
-            for m in all_models:
-                if 'gemini-pro' in m.name and 'latest' not in m.name:
-                     if 'generateContent' in m.supported_generation_methods:
-                        found_model_name = m.name
-                        break
-                        
-        # 4. Final Fallback (Blind Guess)
-        if not found_model_name:
-            found_model_name = 'models/gemini-1.5-flash-001'
-            
-        return genai.GenerativeModel(found_model_name), found_model_name
-
-    except Exception as e:
-        st.error(f"Model List Error: {e}")
-        return None, None
+    return None
 
 # ==========================================
-# 2. CONFIGURATION & SETUP
+# 2. CONFIGURATION
 # ==========================================
+geolocator = Nominatim(user_agent="shinryeong_app_v3")
 
-# Initialize Geocoder
-geolocator = Nominatim(user_agent="shinryeong_app_auto_v1")
-
-# Load Model
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
-    model, model_name = configure_and_find_model(API_KEY)
+    model = get_working_model(API_KEY)
     
     if model is None:
-        st.error("CRITICAL: Could not find any working models.")
+        st.error("🚨 Connection Failed: Could not connect to Gemini Flash or Pro. Please check API Key permissions.")
         st.stop()
         
 except Exception as e:
@@ -106,21 +87,19 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
             concern
         ]
         sheet.append_row(row)
-        return True
-    except Exception as e:
-        print(f"Database Save Failed: {e}")
-        return False
+    except:
+        pass # Silent fail
 
 # ==========================================
-# 4. CITY DATABASE (Fallback)
+# 4. CITY DB (Fallback)
 # ==========================================
 CITY_DB = {
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
     "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
     "대구": (35.87, 128.60), "Daegu": (35.87, 128.60),
-    "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
-    "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
     "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
+    "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
+    "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
     "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
     "New York": (40.71, -74.00), "London": (51.50, -0.12)
 }
@@ -141,13 +120,12 @@ TRANS = {
     "ko": {
         "title": "🔮 신령 (Shinryeong)",
         "subtitle": "AI 형이상학 분석가",
-        "warning": "💡 **알림:** 본 분석 결과는 명리학적 데이터에 기반한 참고용 자료입니다.",
+        "warning": "💡 **알림:** 결과는 참고용입니다.",
         "submit_btn": "🔮 분석 시작하기",
-        "loading": "⏳ 신령을 소환하고 있습니다...",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다. 주요 도시명으로 입력해주세요.",
+        "loading": "⏳ 신령 소환 중...",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다. 주요 도시명으로 입력하세요.",
         "chat_placeholder": "궁금한 점을 물어보세요...",
-        "reset_btn": "🔄 초기화",
-        "model_info": "연결된 AI 모델: "
+        "reset_btn": "🔄 초기화"
     },
     "en": {
         "title": "🔮 Shinryeong",
@@ -157,8 +135,7 @@ TRANS = {
         "loading": "⏳ Summoning Shinryeong...",
         "geo_error": "⚠️ Location not found.",
         "chat_placeholder": "Ask a follow-up...",
-        "reset_btn": "🔄 Reset",
-        "model_info": "Connected AI Model: "
+        "reset_btn": "🔄 Reset"
     }
 }
 
@@ -170,8 +147,6 @@ with st.sidebar:
     if st.button(txt["reset_btn"]):
         st.session_state.clear()
         st.rerun()
-    # Debug info: Show user which model we actually found
-    st.caption(f"{txt['model_info']} `{model_name}`")
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
@@ -246,4 +221,4 @@ else:
                     st.markdown(resp.text)
                     st.session_state.messages.append({"role": "assistant", "content": resp.text})
                 except:
-                    st.error("Connection failed. Try Reset.")
+                    st.error("Connection failed.")
