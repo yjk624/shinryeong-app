@@ -14,7 +14,7 @@ import os
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
 
 # Robust Geocoding
-geolocator = Nominatim(user_agent="shinryeong_app_v11_auto_switch", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_app_v12_smart_compress", timeout=10)
 
 # Initialize Groq
 try:
@@ -49,16 +49,12 @@ KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt")
 CITY_DB = {
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
     "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
-    "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
     "대구": (35.87, 128.60), "Daegu": (35.87, 128.60),
-    "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
+    "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
     "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
+    "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
     "울산": (35.53, 129.31), "Ulsan": (35.53, 129.31),
-    "세종": (36.48, 127.28), "Sejong": (36.48, 127.28),
-    "창원": (35.22, 128.68), "Changwon": (35.22, 128.68),
-    "수원": (37.26, 127.02), "Suwon": (37.26, 127.02),
     "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
-    "강릉": (37.75, 128.87), "Gangneung": (37.75, 128.87),
     "New York": (40.71, -74.00), "London": (51.50, -0.12),
     "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65)
 }
@@ -99,28 +95,36 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_luna
         sheet.append_row(row)
     except: pass
 
-# [SMART ENGINE SWITCHER]
-def generate_ai_response(messages):
-    # Priority List: Best Quality -> Fast/Backup -> Large Context Backup
-    models_to_try = [
-        "llama-3.3-70b-versatile",  # Best Quality (Hit Limit)
-        "llama-3.1-8b-instant",     # Fast Backup (Separate Quota)
-        "mixtral-8x7b-32768"        # Safety Net
+# [SMART ENGINE SWITCHER WITH COMPRESSION]
+def generate_ai_response(messages_full, messages_lite=None):
+    """
+    Tries heavy model with full context first.
+    If fails, tries backup model with full context.
+    If fails (size error), tries small model with LITE context.
+    """
+    
+    # Priority 1: Smartest (Hit limit?)
+    # Priority 2: Large Context Backup (Mixtral)
+    # Priority 3: Fast/Small (Requires Lite Context)
+    
+    plan = [
+        ("llama-3.3-70b-versatile", messages_full),
+        ("mixtral-8x7b-32768", messages_full),
+        ("llama-3.1-8b-instant", messages_lite if messages_lite else messages_full) 
     ]
     
-    for model_name in models_to_try:
+    for model_name, msgs_to_use in plan:
         try:
             stream = client.chat.completions.create(
                 model=model_name,
-                messages=messages,
+                messages=msgs_to_use,
                 temperature=0.6,
-                max_tokens=3000,
+                max_tokens=2500,
                 top_p=1,
                 stream=True,
                 stop=None,
             )
             
-            # If successful, yield the stream
             full_response = ""
             for chunk in stream:
                 if chunk.choices[0].delta.content is not None:
@@ -128,17 +132,16 @@ def generate_ai_response(messages):
                     full_response += content
                     yield content
             
-            # If we finish the loop without error, stop trying models
-            return
+            return # Success!
             
         except Exception as e:
             error_msg = str(e)
-            # If Rate Limit (429), try next model. If other error, keep trying.
-            if "429" in error_msg or "rate limit" in error_msg.lower():
-                print(f"⚠️ Model {model_name} exhausted. Switching...")
-                continue # Try next model in list
-            else:
-                yield f"Error with {model_name}: {error_msg}"
+            # Log error but keep trying next model
+            print(f"⚠️ Model {model_name} failed: {error_msg}")
+            
+            # If we are at the last model and it failed, yield error
+            if model_name == plan[-1][0]:
+                yield f"System Overload. Please try again in 1 minute. (Error: {error_msg})"
                 return
 
 # ==========================================
@@ -176,7 +179,7 @@ TRANS = {
         """,
         "submit_btn": "🔮 Request Analysis",
         "loading": "⏳ Calculating celestial data...",
-        "geo_error": "⚠️ Location not found.",
+        "geo_error": "⚠️ Location not found. Please try a major city.",
         "chat_placeholder": "Follow-up questions?",
         "reset_btn": "🔄 Start New Analysis",
         "dob_label": "Date of Birth", "time_label": "Time of Birth", "gender_label": "Gender",
@@ -192,7 +195,7 @@ with st.sidebar:
     txt = TRANS[lang_code]
     if st.button(txt["reset_btn"]):
         st.session_state.messages = []
-        st.session_state.saju_context = {}
+        st.session_state.saju_context = ""
         st.session_state.user_info_logged = False
         st.rerun()
     st.caption("Engine: Groq Auto-Switch")
@@ -234,7 +237,7 @@ if not st.session_state.saju_context:
                     saju['Birth_Place'] = city_name
                     saju['Gender'] = gender
                     
-                    # CSV Format Display
+                    # CSV Format
                     csv_display = f"""
                     | Parameter | Value |
                     | :--- | :--- |
@@ -245,9 +248,10 @@ if not st.session_state.saju_context:
                     | **Saju** | {saju['Year']} / {saju['Month']} / {saju['Day']} / {saju['Time']} |
                     """
                     
-                    system_prompt = f"""
+                    # 1. FULL PROMPT (Heavy)
+                    system_prompt_full = f"""
                     [SYSTEM ROLE]
-                    You are 'Shinryeong' (신령). Speak in 'Hage-che' (하게체).
+                    You are 'Shinryeong' (신령). Speak in 'Hage-che'.
                     Language: {lang_code.upper()} Only.
                     
                     [KNOWLEDGE BASE]
@@ -260,59 +264,64 @@ if not st.session_state.saju_context:
                     
                     [OUTPUT TEMPLATE]
                     ### 📜 신령의 분석 보고서
-                    
                     {csv_display}
-                    
                     ---
-                    
                     ### [Icon] 1. 타고난 기질과 에너지
-                    (Analyze the 4 Pillars. Use metaphors.)
-                    
                     ### [Icon] 2. 🔍 신령의 공명 (Accuracy Check)
-                    (Cold reading deduction.)
-                    
                     ### [Icon] 3. ⚡ 현재의 흐름과 리스크
-                    (Address concern.)
-                    
-                    ### [Icon] 4. 🛡️ 신령의 처방 (Action Plan)
-                    * **[Icon] 행동 지침:** ...
-                    * **[Icon] 마음가짐:** ...
-                    
+                    ### [Icon] 4. 🛡️ 신령의 처방
                     [[TECHNICAL_SECTION]]
-                    (Technical theory.)
                     """
                     
-                    st.session_state.saju_context = system_prompt
+                    # 2. LITE PROMPT (Lightweight - For 8B fallback)
+                    # We remove the huge KNOWLEDGE_TEXT to fit the 6k token limit
+                    system_prompt_lite = f"""
+                    [SYSTEM ROLE]
+                    You are 'Shinryeong' (신령). Speak in 'Hage-che'.
+                    Language: {lang_code.upper()} Only.
                     
-                    msgs = [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Analyze my Saju. My concern is: {q}"}
-                    ]
+                    [USER DATA]
+                    - Saju: {saju}
+                    - Gender: {gender}
+                    - Concern: "{q}"
+                    
+                    [OUTPUT TEMPLATE]
+                    ### 📜 신령의 분석 보고서 (Lite Version)
+                    {csv_display}
+                    ---
+                    ### [Icon] 1. 타고난 기질과 에너지
+                    ### [Icon] 2. 🔍 신령의 공명 (Accuracy Check)
+                    ### [Icon] 3. ⚡ 현재의 흐름과 리스크
+                    ### [Icon] 4. 🛡️ 신령의 처방
+                    [[TECHNICAL_SECTION]]
+                    """
+                    
+                    st.session_state.saju_context = system_prompt_full
+                    st.session_state.saju_context_lite = system_prompt_lite
+                    
+                    msgs_full = [{"role": "system", "content": system_prompt_full}, {"role": "user", "content": f"Analyze my Saju. Concern: {q}"}]
+                    msgs_lite = [{"role": "system", "content": system_prompt_lite}, {"role": "user", "content": f"Analyze my Saju. Concern: {q}"}]
                     
                     response_container = st.empty()
                     full_text = ""
                     
-                    # Stream and capture full text
-                    for chunk in generate_ai_response(msgs):
+                    for chunk in generate_ai_response(msgs_full, msgs_lite):
                         full_text += chunk
                         response_container.markdown(full_text + "▌")
                     
-                    # Final Render with Split
                     response_container.empty()
                     if "[[TECHNICAL_SECTION]]" in full_text:
                         parts = full_text.split("[[TECHNICAL_SECTION]]")
-                        main_report = parts[0]
-                        theory_report = parts[1]
+                        main_r, theory_r = parts[0], parts[1]
                     else:
-                        main_report = full_text
-                        theory_report = "Technical basis integrated."
+                        main_r, theory_r = full_text, "Technical analysis provided in main text."
 
-                    st.markdown(main_report)
+                    st.markdown(main_r)
                     with st.expander(txt["theory_header"]):
-                        st.markdown(theory_report)
+                        st.markdown(theory_r)
 
                     st.session_state.messages.append({"role": "user", "content": q})
-                    st.session_state.messages.append({"role": "assistant", "content": main_report, "theory": theory_report})
+                    st.session_state.messages.append({"role": "assistant", "content": main_r, "theory": theory_r})
                     
                     if not st.session_state.user_info_logged:
                         save_to_database(saju, b_date, b_time, q, is_lunar)
@@ -332,15 +341,18 @@ else:
         st.session_state.messages.append({"role": "user", "content": p})
         with st.chat_message("user"): st.markdown(p)
         
-        # Optimize Context for Follow-ups (Only send last 2 turns + Prompt)
-        msgs = [{"role": "system", "content": st.session_state.saju_context}]
-        for m in st.session_state.messages[-4:]: # Keep only last 4 messages to save tokens
-            msgs.append({"role": m["role"], "content": m["content"]})
+        # Prepare context
+        msgs_full = [{"role": "system", "content": st.session_state.saju_context}]
+        msgs_lite = [{"role": "system", "content": st.session_state.get("saju_context_lite", st.session_state.saju_context)}]
+        
+        for m in st.session_state.messages[-4:]:
+            msgs_full.append({"role": m["role"], "content": m["content"]})
+            msgs_lite.append({"role": m["role"], "content": m["content"]})
             
         with st.chat_message("assistant"):
             response_container = st.empty()
             full_text = ""
-            for chunk in generate_ai_response(msgs):
+            for chunk in generate_ai_response(msgs_full, msgs_lite):
                 full_text += chunk
                 response_container.markdown(full_text + "▌")
             
