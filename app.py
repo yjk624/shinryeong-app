@@ -6,11 +6,12 @@ from geopy.geocoders import Nominatim
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
+import os
 
 # ==========================================
 # 1. CONFIGURATION (GROQ ENGINE)
 # ==========================================
-geolocator = Nominatim(user_agent="shinryeong_app_groq_v3")
+geolocator = Nominatim(user_agent="shinryeong_app_groq_v4")
 
 # Initialize Groq Client
 try:
@@ -29,7 +30,21 @@ if "user_info_logged" not in st.session_state:
     st.session_state.user_info_logged = False
 
 # ==========================================
-# 2. DATABASE FUNCTION
+# 2. KNOWLEDGE BASE LOADER (THE BRAIN)
+# ==========================================
+@st.cache_data
+def load_knowledge_base():
+    """Reads the text file that contains all Saju logic."""
+    try:
+        # Tries to read the file from the same folder as app.py
+        with open("knowledgebase.txt", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        st.error("⚠️ critical Error: 'knowledgebase.txt' not found in repository.")
+        return ""
+
+# ==========================================
+# 3. DATABASE FUNCTION
 # ==========================================
 def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
     try:
@@ -57,7 +72,7 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
         pass
 
 # ==========================================
-# 3. HELPER FUNCTIONS
+# 4. HELPER FUNCTIONS
 # ==========================================
 CITY_DB = {
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
@@ -80,9 +95,6 @@ def get_coordinates(city_name):
     return None
 
 def generate_ai_response(messages):
-    """
-    Generator function that streams clean text from Groq.
-    """
     stream = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=messages,
@@ -92,13 +104,12 @@ def generate_ai_response(messages):
         stream=True,
         stop=None,
     )
-    # [FIX] Unpack the JSON chunks here so Streamlit gets pure text
     for chunk in stream:
         if chunk.choices[0].delta.content is not None:
             yield chunk.choices[0].delta.content
 
 # ==========================================
-# 4. UI LAYOUT
+# 5. UI LAYOUT
 # ==========================================
 TRANS = {
     "ko": {
@@ -138,8 +149,11 @@ st.caption(txt["subtitle"])
 st.info(txt["warning"])
 
 # ==========================================
-# 5. APP LOGIC
+# 6. APP LOGIC
 # ==========================================
+# Load the Knowledge Base ONCE
+KNOWLEDGE_BASE_TEXT = load_knowledge_base()
+
 if not st.session_state.saju_context:
     with st.form("input"):
         col1, col2 = st.columns(2)
@@ -164,20 +178,34 @@ if not st.session_state.saju_context:
                     saju['Birth_Place'] = loc_in
                     saju['Gender'] = gender
                     
-                    ctx = f"""[SYSTEM: USER DATA]
-                    {saju}
-                    Gender: {gender}
-                    Loc: {loc_in}
-                    Lang: {lang_code}
-                    Role: Shinryeong (Hage-che tone, Easy Korean)
-                    Rule: Do NOT cite 'Volume 4'."""
+                    # [CRITICAL UPDATE] Inject the Knowledge Base into the System Prompt
+                    ctx = f"""
+                    [ROLE DEFINITION]
+                    You are 'Shinryeong', a Metaphysical Analyst.
+                    - Tone: Hage-che (하게체) - Old sage style.
+                    - Language: ALWAYS respond in KOREAN (Hangul).
+                    
+                    [KNOWLEDGE BASE]
+                    Use the following rules to analyze the user's destiny. Do not summarize this; APPLY it.
+                    {KNOWLEDGE_BASE_TEXT}
+                    
+                    [USER DATA]
+                    - Saju Pillars: {saju}
+                    - Gender: {gender}
+                    - Location: {loc_in}
+                    
+                    [INSTRUCTION]
+                    Analyze the user's Saju structure based on the Knowledge Base. 
+                    Address their concern: "{q}"
+                    Do NOT mention 'Volume 4' or 'Knowledge Base' explicitly. Just give the advice.
+                    """
                     
                     st.session_state.saju_context = ctx
                     
                     # Initial Prompt
                     msgs = [
                         {"role": "system", "content": ctx},
-                        {"role": "user", "content": f"User's First Concern: {q}\nAnalyze this."}
+                        {"role": "user", "content": q}
                     ]
                     
                     try:
