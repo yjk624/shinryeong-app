@@ -95,7 +95,7 @@ def analyze_logic_v16(saju_res):
     elif my_elem == '금': supporters = ['토', '금']
     elif my_elem == '수': supporters = ['금', '수']
     
-    # 3. Strength Scoring (Rigorous)
+    # 3. Strength Scoring
     score = 0
     if season_elem in supporters: score += 50
     else: score -= 50 
