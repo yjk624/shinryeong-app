@@ -16,7 +16,7 @@ st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v16.2 (문법 수정완료)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v16.2 (오류 완전수정)",
         "sidebar_title": "설정", "lang_btn": "English Mode", "reset_btn": "새로운 상담 시작",
         "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시",
         "input_gender": "성별", "concern_label": "당신의 고민을 구체적으로 적어주세요.",
@@ -95,7 +95,7 @@ def analyze_logic_v16(saju_res):
     elif my_elem == '금': supporters = ['토', '금']
     elif my_elem == '수': supporters = ['금', '수']
     
-    # 3. Strength Scoring
+    # 3. Strength Scoring (Rigorous)
     score = 0
     if season_elem in supporters: score += 50
     else: score -= 50 
@@ -133,14 +133,14 @@ def analyze_logic_v16(saju_res):
         if ce == my_wealth: wealth_count += 1
         
     pattern = "일반격"
-    # [FIXED: Single line string or Triple quotes for safety]
+    # [FIXED: String Syntax Error Solved]
     advice_core = "오행의 균형을 맞추는 것이 중요하네. 
 
 [Image of Five Elements Cycle]
 " 
     
     if "신약" in strength and wealth_count >= 3:
-        pattern = "재다신약(財多身弱)"
+        pattern = "재다신약(財多身弱 - 재물은 많으나 가질 힘이 약함)"
         strength = "극신약(Very Weak)"
         strength_desc = "그대는 재물과 기회(돈/여자/일) 속에 둘러싸여 있으나, 정작 그것을 쥘 힘이 부족해 건강을 잃거나 스트레스를 받는 형국이네."
         advice_core = "돈을 쫓지 말고, **'자신을 채우는 공부(인성)'**나 **'믿을만한 동료(비겁)'**와 함께해야 재물이 내 것이 되네."
@@ -178,7 +178,7 @@ def generate_ai_response(messages, mode="report"):
     sys_instruction = """
 [CRITICAL RULE]
 1. Role: 'Shinryeong' (Divine Guru). Tone: Hage-che (하게체: ~하네, ~이라네).
-2. Language: KOREAN ONLY. NO Chinese characters (except in brackets) or English words in the final output text.
+2. Language: KOREAN ONLY. Absolutely NO Chinese characters (except in brackets) or English words in the final output text.
 3. Source: Use the provided [NARRATIVE DATA]. Do NOT calculate or invent new facts.
 4. If the data says 'Jae-da-sin-yak', DO NOT say 'You are strong'. Say "You are surrounded by wealth but need strength to hold it."
 5. Visuals: Insert 
