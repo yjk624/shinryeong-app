@@ -1,5 +1,6 @@
-
 streamlit
 google-generativeai
 ephem
 geopy
+gspread
+oauth2client
