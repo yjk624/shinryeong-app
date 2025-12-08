@@ -9,24 +9,26 @@ from korean_lunar_calendar import KoreanLunarCalendar
 import json
 
 # ==========================================
-# 0. CONFIG & TEXTS (Must be first)
+# 0. CONFIG & TEXTS
 # ==========================================
 st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
 UI_TEXT = {
     "ko": {
-        "title": "🔮 신령 사주리포트", "caption": "정통 명리학 기반 데이터 분석 시스템 v15.0 (최종 완성)",
+        "title": "🔮 신령 사주리포트",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v15.0 (Final)",
         "sidebar_title": "설정", "lang_btn": "English Mode", "reset_btn": "새로운 상담 시작",
-        "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시 (예: 서울, 부산)",
+        "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시",
         "input_gender": "성별", "concern_label": "당신의 고민을 구체적으로 적어주세요.",
         "submit_btn": "📜 정밀 분석 시작", "loading": "천문 데이터 계산 및 신강/신약 정밀 판별 중...",
         "warn_title": "법적 면책 조항", "warn_text": "본 분석은 통계적 참고자료입니다.",
         "placeholder": "추가 질문을 입력하세요..."
     },
     "en": {
-        "title": "🔮 Shinryeong Destiny Report", "caption": "Authentic Saju Analysis System v15.0",
+        "title": "🔮 Shinryeong Destiny Report",
+        "caption": "Authentic Saju Analysis System v15.0",
         "sidebar_title": "Settings", "lang_btn": "한국어 모드", "reset_btn": "Reset Session",
-        "input_dob": "Date of Birth", "input_time": "Birth Time", "input_city": "Birth City (e.g., Seoul)",
+        "input_dob": "Date of Birth", "input_time": "Birth Time", "input_city": "Birth City",
         "input_gender": "Gender", "concern_label": "Describe your specific concern.",
         "submit_btn": "📜 Start Analysis", "loading": "Calculating Astral Data...",
         "warn_title": "Legal Disclaimer", "warn_text": "Reference only.",
@@ -68,21 +70,6 @@ def get_coordinates(city_input):
         loc = geolocator.geocode(city_input)
         if loc: return (loc.latitude, loc.longitude), city_input
     except: pass
-    
-    if city_input and any(c.isalpha() for c in city_input):
-        try:
-            approx_loc = geolocator.geocode(city_input + ", South Korea", timeout=3)
-            if approx_loc:
-                min_dist = float('inf')
-                nearest_coords = None
-                input_pt = (approx_loc.latitude, approx_loc.longitude)
-                for coords in CITY_DB.values():
-                    dist = great_circle(input_pt, coords).km
-                    if dist < min_dist:
-                        min_dist = dist
-                        nearest_coords = coords
-                if min_dist < 50: return nearest_coords, f"{city_input} (Nearest)"
-        except: pass
     return None, None
 
 def convert_lunar_to_solar(year, month, day, is_intercalary):
@@ -93,43 +80,42 @@ def convert_lunar_to_solar(year, month, day, is_intercalary):
     except: return None
 
 # ==========================================
-# 2. LOGIC ENGINE (v15.0 - Logic Fix)
+# 2. LOGIC ENGINE (v15.0 - Direct Mapping)
 # ==========================================
 def analyze_logic_v15(saju_res):
     """
-    Robust logic for Strength and Pattern.
+    Directly analyzes the Saju result from engine.
     """
-    dm = saju_res['Day_Stem'] # 일간 (나)
-    season = saju_res['Month_Branch'] # 월지 (계절)
+    # saju_res has keys: 'Day_Stem', 'Month_Branch', 'Full_String', 'Shinsal', etc.
+    dm = saju_res['Day_Stem']
+    season = saju_res['Month_Branch']
     full_str = saju_res['Full_String']
     
-    # 1. Elements Definition
+    # 1. Elements
     elem_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
     season_map = {'인':'목','묘':'목','진':'토','사':'화','오':'화','미':'토','신':'금','유':'금','술':'토','해':'수','자':'수','축':'토'}
     
     my_elem = elem_map[dm]
     season_elem = season_map[season]
     
-    # 2. Supporters (Indicates 'My Side')
+    # 2. Supporters (My Resource & Friends)
     supporters = []
     if my_elem == '목': supporters = ['수', '목']
     elif my_elem == '화': supporters = ['목', '화']
     elif my_elem == '토': supporters = ['화', '토']
     elif my_elem == '금': supporters = ['토', '금']
-    elif my_elem == '수': supporters = ['금', '수'] # Water needs Metal & Water
+    elif my_elem == '수': supporters = ['금', '수']
     
-    # 3. Strength Calculation (Scoring)
+    # 3. Strength Calculation
     score = 0
-    # Season (Month) Check - The most important factor
-    # If Season supports Me -> +50. If not -> -50.
-    if season_elem in supporters: 
-        score += 50
-    else: 
-        score -= 50 # Penalize heavily for Sil-ryeong (Born in hostile season)
-        
+    # Season Check (+50 / -50)
+    if season_elem in supporters: score += 50
+    else: score -= 50 # Penalize for Sil-ryeong
+    
     # Pillar Check
     for char in full_str:
         if char == ' ': continue
+        # Simple element mapping for counting
         ce = '토'
         if char in "갑을인묘": ce = '목'
         elif char in "병정사오": ce = '화'
@@ -138,15 +124,16 @@ def analyze_logic_v15(saju_res):
         
         if ce in supporters: score += 10
         else: score -= 5
-    
+            
     # Diagnosis
     if score >= 10: 
         strength = "신강(Strong - 주도적)" 
+        advice_base = "자신의 에너지를 밖으로 표출하고 리드해야 운이 풀림."
     else: 
         strength = "신약(Sensitive - 섬세함)"
+        advice_base = "환경에 민감하므로, 좋은 사람(귀인)을 곁에 두고 실리를 챙겨야 함."
 
-    # 4. Pattern Detection
-    # Wealth Element: What I control
+    # 4. Pattern Detection (Jae-da-sin-yak)
     wealth_map = {'목':'토', '화':'금', '토':'수', '금':'목', '수':'화'}
     my_wealth = wealth_map[my_elem]
     
@@ -160,16 +147,12 @@ def analyze_logic_v15(saju_res):
         if ce == my_wealth: wealth_count += 1
         
     pattern = "일반격"
-    advice_core = "오행의 균형을 맞추는 것이 중요하네."
-    
-    # Jae-da-sin-yak Check: Weak AND Many Wealth
     if "신약" in strength and wealth_count >= 3:
-        pattern = "재다신약(財多身弱 - 재물은 많으나 가질 힘이 약함)"
-        strength = "극신약(Very Weak)" # Force logic update
-        advice_core = "돈을 쫓으면 건강을 해치거나 돈이 나가는 구조일세. 본인의 실력(자격증, 공부)을 키우거나, 주변 동료(비견/겁재)와 협업해야 돈이 모이네."
+        pattern = "재다신약(財多身弱)"
+        strength = "극신약(Very Weak)"
+        advice_base = "재물 욕심은 많으나 쥘 힘이 부족함. 돈을 쫓으면 건강을 잃으니, 공부(자격증)나 사람(인맥)을 먼저 얻어야 돈이 따라옴."
     elif wealth_count >= 3:
         pattern = "재성과다(Wealth Overload - 사업가적 기질)"
-        advice_core = "타고난 사업가 기질이 있으나, 재물 관리에 신중해야 하네."
 
     # 5. Metaphor
     metaphor_db = {
@@ -178,30 +161,27 @@ def analyze_logic_v15(saju_res):
         '임': "바다(Strategist)", '계': "봄비(Intuitive)"
     }
     
-    # 6. Shinsal
+    # 6. Shinsal from Engine
     shinsal = ", ".join(saju_res['Shinsal']) if saju_res['Shinsal'] else "평온함"
 
     return {
         "identity": dm, "metaphor": metaphor_db.get(dm, "기운"),
-        "strength": strength, "pattern": pattern, "advice": advice_core,
+        "strength": strength, "pattern": pattern, "advice": advice_base,
         "shinsal": shinsal, "pillars": full_str,
         "wealth_count": wealth_count
     }
 
 def generate_ai_response(messages, lang_mode):
-    # STRICT SYSTEM PROMPT
+    # Persona Injection (No English Output)
     sys_instruction = """
-[CRITICAL INSTRUCTION]
-Role: You are 'Shinryeong' (Divine Guru). Tone: Hage-che (하게체: ~하네, ~이라네).
-Language: KOREAN ONLY. No German/Chinese/English in body text.
-Input Data is Absolute Truth: Use the provided Strength and Pattern strictly.
-Task:
-1. If Pattern is '재다신약', explain: "You have many opportunities for money, but you are too weak to hold them alone. Strengthen yourself with study or friends."
-2. Explain 'Shinsal' (e.g. Yeokma) in terms of real life (moving, travel).
-3. Insert 
+[CRITICAL RULE] You are 'Shinryeong' (Divine Guru). Tone: Hage-che (하게체: ~하네, ~이라네).
+Language: KOREAN ONLY. No English/German words in output body.
+Format: Use the provided JSON data. 
+Visuals: Insert 
 
 [Image of Five Elements Cycle]
  when explaining balance.
+Task: Write a detailed report. Explain terms like '신강', '재다신약', '도화살' simply.
 """
     if messages[0]['role'] == 'system':
         messages[0]['content'] += f"\n{sys_instruction}"
@@ -214,7 +194,7 @@ Task:
             )
             return stream.choices[0].message.content
         except: time_module.sleep(0.5); continue
-    return "⚠️ 신령이 침묵하고 있네. 잠시 후 다시 시도하게."
+    return "⚠️ 신령이 응답하지 못했습니다."
 
 # ==========================================
 # 3. MAIN UI FLOW
@@ -225,7 +205,7 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
     
-    with st.expander("🛠️ 데이터 진단", expanded=False):
+    with st.expander("🔍 데이터 진단", expanded=False):
         st.json(st.session_state.saju_data_dict)
 
 t = UI_TEXT[st.session_state.lang]
@@ -267,8 +247,8 @@ if not st.session_state.analysis_complete:
                     saju_res = calculate_saju_v3(final_date.year, final_date.month, final_date.day, 
                                                time_val.hour, time_val.minute, coords[0], coords[1])
                     
-                    # 2. Logic (Python Truth Engine)
-                    facts = analyze_logic_v15(parse_saju_to_korean(saju_res))
+                    # 2. Logic (Correctly calling v15)
+                    facts = analyze_logic_v15(saju_res)
                     
                     st.session_state.saju_data_dict = facts
                     st.session_state.raw_input_data = {"date": str(final_date), "concern": concern}
