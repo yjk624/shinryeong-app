@@ -65,3 +65,41 @@ def calculate_saju_v3(year, month, day, hour, minute, lat, lon):
     sun.compute(observer)
     sun_lon_deg = math.degrees(ephem.Ecliptic(sun).lon)
     if sun_lon_deg < 0: sun_lon_deg += 360
+
+    # 3. Pillars
+    # Year
+    saju_year = year - 1 if (month <= 2 and 270 <= sun_lon_deg < 315) else year
+    year_stem, year_branch = get_ganji_tuple((saju_year - 1924) % 60)
+    
+    # Month
+    term_deg = (sun_lon_deg - 315) if sun_lon_deg >= 315 else (sun_lon_deg + 45)
+    month_idx = int(term_deg // 30) % 12
+    y_stem_idx = CHEONGAN.index(year_stem)
+    m_stem_idx = ((y_stem_idx % 5) * 2 + 2 + month_idx) % 10
+    month_stem, month_branch = CHEONGAN[m_stem_idx], JIJI[(2 + month_idx) % 12]
+
+    # Day (JD Method)
+    jd = gregorian_to_jd(year, month, day)
+    day_offset = int(jd - 2415021 + 0.5) 
+    day_stem, day_branch = get_ganji_tuple((10 + day_offset) % 60)
+
+    # Time
+    time_idx = ((hour + 1) // 2) % 12
+    d_stem_idx = CHEONGAN.index(day_stem)
+    t_stem_idx = ((d_stem_idx % 5) * 2 + time_idx) % 10
+    time_stem, time_branch = CHEONGAN[t_stem_idx], JIJI[time_idx]
+
+    full_str = f"{year_stem}{year_branch} {month_stem}{month_branch} {day_stem}{day_branch} {time_stem}{time_branch}"
+    
+    return {
+        "Year": f"{year_stem}{year_branch}", "Month": f"{month_stem}{month_branch}",
+        "Day": f"{day_stem}{day_branch}", "Time": f"{time_stem}{time_branch}",
+        "Day_Stem": day_stem, "Month_Branch": month_branch,
+        "Full_String": full_str,
+        "Ten_Gods": {
+            "Year": calculate_ten_gods(day_stem, year_stem),
+            "Month": calculate_ten_gods(day_stem, month_stem),
+            "Time": calculate_ten_gods(day_stem, time_stem)
+        },
+        "Shinsal": calculate_shinsal(full_str)
+    }
