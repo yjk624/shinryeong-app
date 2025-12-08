@@ -14,7 +14,7 @@ import os
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
 
 # Robust Geocoding
-geolocator = Nominatim(user_agent="shinryeong_app_v12_smart_compress", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_app_v13_pro_master", timeout=10)
 
 # Initialize Groq
 try:
@@ -30,7 +30,7 @@ if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "user_info_logged" not in st.session_state: st.session_state.user_info_logged = False
 
 # ==========================================
-# 2. FILE LOADERS
+# 2. FILE LOADERS (Optimized)
 # ==========================================
 @st.cache_data
 def load_text_file(filename):
@@ -40,23 +40,26 @@ def load_text_file(filename):
     except FileNotFoundError:
         return ""
 
+# Load Prompts
 PROMPT_TEXT = load_text_file("prompt.txt")
 KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt")
 
 # ==========================================
-# 3. HELPER FUNCTIONS & SMART AI ENGINE
+# 3. HELPER FUNCTIONS
 # ==========================================
 CITY_DB = {
+    # Major Global Cities for Instant Fallback
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
     "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
-    "대구": (35.87, 128.60), "Daegu": (35.87, 128.60),
     "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
-    "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
+    "대구": (35.87, 128.60), "Daegu": (35.87, 128.60),
     "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
-    "울산": (35.53, 129.31), "Ulsan": (35.53, 129.31),
+    "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
     "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
+    "창원": (35.22, 128.68), "Changwon": (35.22, 128.68),
     "New York": (40.71, -74.00), "London": (51.50, -0.12),
-    "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65)
+    "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65),
+    "Los Angeles": (34.05, -118.24), "Sydney": (-33.86, 151.20)
 }
 
 def get_coordinates(city_input):
@@ -95,54 +98,36 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_luna
         sheet.append_row(row)
     except: pass
 
-# [SMART ENGINE SWITCHER WITH COMPRESSION]
-def generate_ai_response(messages_full, messages_lite=None):
+def generate_ai_response(messages):
     """
-    Tries heavy model with full context first.
-    If fails, tries backup model with full context.
-    If fails (size error), tries small model with LITE context.
+    Priority: Llama 3.3 (Genius) -> Mixtral (Large Memory) -> Llama 3.1 (Backup)
     """
+    models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "llama-3.1-8b-instant"]
     
-    # Priority 1: Smartest (Hit limit?)
-    # Priority 2: Large Context Backup (Mixtral)
-    # Priority 3: Fast/Small (Requires Lite Context)
-    
-    plan = [
-        ("llama-3.3-70b-versatile", messages_full),
-        ("mixtral-8x7b-32768", messages_full),
-        ("llama-3.1-8b-instant", messages_lite if messages_lite else messages_full) 
-    ]
-    
-    for model_name, msgs_to_use in plan:
+    for model in models:
         try:
             stream = client.chat.completions.create(
-                model=model_name,
-                messages=msgs_to_use,
+                model=model,
+                messages=messages,
                 temperature=0.6,
-                max_tokens=2500,
+                max_tokens=4500, # Allow for long, detailed reports
                 top_p=1,
                 stream=True,
                 stop=None,
             )
-            
             full_response = ""
             for chunk in stream:
                 if chunk.choices[0].delta.content is not None:
                     content = chunk.choices[0].delta.content
                     full_response += content
                     yield content
-            
-            return # Success!
-            
+            return # Success
         except Exception as e:
-            error_msg = str(e)
-            # Log error but keep trying next model
-            print(f"⚠️ Model {model_name} failed: {error_msg}")
+            # If rate limit or size error, try next model
+            print(f"⚠️ Model {model} failed: {e}")
+            continue
             
-            # If we are at the last model and it failed, yield error
-            if model_name == plan[-1][0]:
-                yield f"System Overload. Please try again in 1 minute. (Error: {error_msg})"
-                return
+    yield "⚠️ System Busy: All AI models are currently overloaded. Please try again in 1 minute."
 
 # ==========================================
 # 4. UI LAYOUT
@@ -150,42 +135,32 @@ def generate_ai_response(messages_full, messages_lite=None):
 TRANS = {
     "ko": {
         "title": "🔮 신령 (Shinryeong)",
-        "subtitle": "AI 형이상학 분석가",
-        "warning": """
-        ⚖️ **법적 면책 조항 (Disclaimer):**
-        1. 본 서비스는 명리학 및 자미두수 데이터를 기반으로 한 **학술적 분석**이며, 절대적인 예언이 아닙니다.
-        2. 신령은 **의학적 진단(Medical Diagnosis)이나 법률적 조언(Legal Advice)**을 제공하지 않습니다.
-        3. 본 분석 결과에 따른 사용자의 결정과 그 결과에 대한 책임은 전적으로 **사용자 본인**에게 있습니다.
-        """,
-        "submit_btn": "🔮 신령에게 분석 요청하기",
-        "loading": "⏳ 천문 데이터를 계산하고 신령을 소환하는 중...",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다. 주요 도시명으로 다시 시도해주세요.",
-        "chat_placeholder": "추가로 궁금한 점이 있으신가요? (예: 내년의 재물운은?)",
-        "reset_btn": "🔄 새로운 분석 시작",
+        "subtitle": "AI 정통 명리학 분석가",
+        "warning": "⚖️ 본 분석은 명리학적 통계에 기반한 학술적 자료이며, 법률/의학적 조언이 아닙니다.",
+        "submit_btn": "🔮 신령에게 정밀 분석 요청하기",
+        "loading": "⏳ 천문 데이터를 분석하고 신령을 소환하는 중...",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다. (예: 서울, 창원, 뉴욕)",
+        "chat_placeholder": "추가로 궁금한 점이 있으신가요?",
+        "reset_btn": "🔄 새로운 분석",
         "dob_label": "생년월일", "time_label": "태어난 시간", "gender_label": "성별",
-        "male": "남성", "female": "여성", "loc_label": "태어난 지역 (도시명)",
-        "concern_label": "현재 가장 큰 고민은 무엇인가요?",
+        "male": "남성", "female": "여성", "loc_label": "태어난 지역 (구체적 지명 입력 가능)",
+        "concern_label": "가장 큰 고민은 무엇인가요?",
         "cal_label": "양력/음력 구분",
         "theory_header": "📚 분석 근거 (Technical Basis)"
     },
     "en": {
         "title": "🔮 Shinryeong",
         "subtitle": "AI Metaphysical Analyst",
-        "warning": """
-        ⚖️ **Legal Disclaimer:**
-        1. This service provides **academic analysis** based on Saju and Jami Dou Shu data; it is not absolute prophecy.
-        2. Shinryeong does **NOT provide Medical Diagnoses or Legal Advice**.
-        3. The user bears full responsibility for any decisions made based on this analysis.
-        """,
-        "submit_btn": "🔮 Request Analysis",
-        "loading": "⏳ Calculating celestial data...",
-        "geo_error": "⚠️ Location not found. Please try a major city.",
+        "warning": "⚖️ Academic analysis based on Saju data. Not legal/medical advice.",
+        "submit_btn": "🔮 Request Deep Analysis",
+        "loading": "⏳ Analyzing celestial data...",
+        "geo_error": "⚠️ Location not found.",
         "chat_placeholder": "Follow-up questions?",
-        "reset_btn": "🔄 Start New Analysis",
+        "reset_btn": "🔄 New Analysis",
         "dob_label": "Date of Birth", "time_label": "Time of Birth", "gender_label": "Gender",
-        "male": "Male", "female": "Female", "loc_label": "Birth Place (City)",
-        "concern_label": "What is your main concern?",
-        "cal_label": "Calendar Type",
+        "male": "Male", "female": "Female", "loc_label": "Birth Place",
+        "concern_label": "Main Concern",
+        "cal_label": "Calendar",
         "theory_header": "📚 Technical Basis"
     }
 }
@@ -198,7 +173,7 @@ with st.sidebar:
         st.session_state.saju_context = ""
         st.session_state.user_info_logged = False
         st.rerun()
-    st.caption("Engine: Groq Auto-Switch")
+    st.caption("Engine: Llama-3.3 (Genius)")
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
@@ -216,7 +191,7 @@ if not st.session_state.saju_context:
             cal_type = st.radio(txt["cal_label"], ["양력 (Solar)", "음력 (Lunar)"])
         with col2:
             gender = st.radio(txt["gender_label"], [txt["male"], txt["female"]])
-            loc_in = st.text_input(txt["loc_label"], placeholder="Seoul, Busan...")
+            loc_in = st.text_input(txt["loc_label"], placeholder="Seoul, Busan, New York...")
         q = st.text_area(txt["concern_label"], height=100)
         submitted = st.form_submit_button(txt["submit_btn"])
 
@@ -237,75 +212,76 @@ if not st.session_state.saju_context:
                     saju['Birth_Place'] = city_name
                     saju['Gender'] = gender
                     
-                    # CSV Format
-                    csv_display = f"""
-                    | Parameter | Value |
+                    # ----------------------------------------------------
+                    # ULTIMATE SYSTEM PROMPT (The Soul of the App)
+                    # ----------------------------------------------------
+                    # We inject the "Persona" and "Structure" forcefully.
+                    
+                    current_year = datetime.now().year
+                    
+                    system_prompt = f"""
+                    [SYSTEM ROLE]
+                    You are 'Shinryeong' (신령). You are a master of Saju Myeongli.
+                    Tone: Authoritative, Mystical, yet Logical (Hage-che / 하게체).
+                    Language: {lang_code.upper()} Only.
+                    
+                    [KNOWLEDGE BASE OVERVIEW]
+                    {KNOWLEDGE_TEXT[:4000]} 
+                    (Note: Knowledge condensed to save memory. Use general Saju logic for details.)
+                    
+                    [USER DATA]
+                    - Saju: {saju}
+                    - Gender: {gender}
+                    - Location: {city_name}
+                    - Calendar: {cal_type}
+                    - Concern: "{q}"
+                    - Current Year: {current_year}
+                    
+                    [CRITICAL INSTRUCTION: COLD READING]
+                    You MUST prove your accuracy. Look at the User's Year/Day Pillars.
+                    Find a recent year (e.g., 2022, 2023, 2024) where there was a 'Clash' (Chung) or 'Combination' (Hap) with their Day Master.
+                    Then, in Section 2, ask a SPECIFIC question like:
+                    "Did you experience a separation or job change in [Year] due to the [Clash Name] energy?"
+                    
+                    [OUTPUT FORMAT TEMPLATE]
+                    Start exactly with this Markdown table:
+                    | 구분 | 내용 |
                     | :--- | :--- |
-                    | **Date** | {b_date} ({cal_type}) |
-                    | **Time** | {b_time} |
-                    | **Location** | {city_name} |
-                    | **Gender** | {gender} |
-                    | **Saju** | {saju['Year']} / {saju['Month']} / {saju['Day']} / {saju['Time']} |
-                    """
+                    | **생년월일** | {b_date} ({cal_type}) |
+                    | **사주(간지)** | {saju['Year']} / {saju['Month']} / {saju['Day']} / {saju['Time']} |
+                    | **분석 주제** | {q} |
                     
-                    # 1. FULL PROMPT (Heavy)
-                    system_prompt_full = f"""
-                    [SYSTEM ROLE]
-                    You are 'Shinryeong' (신령). Speak in 'Hage-che'.
-                    Language: {lang_code.upper()} Only.
-                    
-                    [KNOWLEDGE BASE]
-                    {KNOWLEDGE_TEXT}
-                    
-                    [USER DATA]
-                    - Saju: {saju}
-                    - Gender: {gender}
-                    - Concern: "{q}"
-                    
-                    [OUTPUT TEMPLATE]
-                    ### 📜 신령의 분석 보고서
-                    {csv_display}
                     ---
-                    ### [Icon] 1. 타고난 기질과 에너지
-                    ### [Icon] 2. 🔍 신령의 공명 (Accuracy Check)
-                    ### [Icon] 3. ⚡ 현재의 흐름과 리스크
-                    ### [Icon] 4. 🛡️ 신령의 처방
+                    
+                    ### 🔮 1. 타고난 명(命)과 기질
+                    (Analyze the 4 Pillars deeply. Use metaphors like "Lonely Pine Tree" or "Raging Ocean". Bold key terms.)
+                    
+                    ### 👁️ 2. 신령의 공명 (Accuracy Check)
+                    (Perform the Cold Reading here. Ask the specific question about a past event to prove accuracy.)
+                    
+                    ### ⚡ 3. 흐름과 리스크 (Solution)
+                    (Directly answer the user's concern "{q}". Be sharp and honest.)
+                    
+                    ### 🛡️ 4. 신령의 처방 (Action Plan)
+                    * **행동:** ...
+                    * **마음가짐:** ...
+                    * **개운법:** ...
+                    
                     [[TECHNICAL_SECTION]]
+                    (Explain the technical derivation: "This analysis is based on the clash between Water and Fire in the Month Pillar...")
                     """
                     
-                    # 2. LITE PROMPT (Lightweight - For 8B fallback)
-                    # We remove the huge KNOWLEDGE_TEXT to fit the 6k token limit
-                    system_prompt_lite = f"""
-                    [SYSTEM ROLE]
-                    You are 'Shinryeong' (신령). Speak in 'Hage-che'.
-                    Language: {lang_code.upper()} Only.
+                    st.session_state.saju_context = system_prompt
                     
-                    [USER DATA]
-                    - Saju: {saju}
-                    - Gender: {gender}
-                    - Concern: "{q}"
-                    
-                    [OUTPUT TEMPLATE]
-                    ### 📜 신령의 분석 보고서 (Lite Version)
-                    {csv_display}
-                    ---
-                    ### [Icon] 1. 타고난 기질과 에너지
-                    ### [Icon] 2. 🔍 신령의 공명 (Accuracy Check)
-                    ### [Icon] 3. ⚡ 현재의 흐름과 리스크
-                    ### [Icon] 4. 🛡️ 신령의 처방
-                    [[TECHNICAL_SECTION]]
-                    """
-                    
-                    st.session_state.saju_context = system_prompt_full
-                    st.session_state.saju_context_lite = system_prompt_lite
-                    
-                    msgs_full = [{"role": "system", "content": system_prompt_full}, {"role": "user", "content": f"Analyze my Saju. Concern: {q}"}]
-                    msgs_lite = [{"role": "system", "content": system_prompt_lite}, {"role": "user", "content": f"Analyze my Saju. Concern: {q}"}]
+                    msgs = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Analyze my Saju deeply. My concern is: {q}"}
+                    ]
                     
                     response_container = st.empty()
                     full_text = ""
                     
-                    for chunk in generate_ai_response(msgs_full, msgs_lite):
+                    for chunk in generate_ai_response(msgs):
                         full_text += chunk
                         response_container.markdown(full_text + "▌")
                     
@@ -314,7 +290,7 @@ if not st.session_state.saju_context:
                         parts = full_text.split("[[TECHNICAL_SECTION]]")
                         main_r, theory_r = parts[0], parts[1]
                     else:
-                        main_r, theory_r = full_text, "Technical analysis provided in main text."
+                        main_r, theory_r = full_text, "Analysis based on standard Saju logic."
 
                     st.markdown(main_r)
                     with st.expander(txt["theory_header"]):
@@ -341,18 +317,15 @@ else:
         st.session_state.messages.append({"role": "user", "content": p})
         with st.chat_message("user"): st.markdown(p)
         
-        # Prepare context
-        msgs_full = [{"role": "system", "content": st.session_state.saju_context}]
-        msgs_lite = [{"role": "system", "content": st.session_state.get("saju_context_lite", st.session_state.saju_context)}]
-        
-        for m in st.session_state.messages[-4:]:
-            msgs_full.append({"role": m["role"], "content": m["content"]})
-            msgs_lite.append({"role": m["role"], "content": m["content"]})
+        # Optimize context for chat
+        msgs = [{"role": "system", "content": st.session_state.saju_context}]
+        for m in st.session_state.messages[-2:]: # Keep history short to avoid 429 Error
+            msgs.append({"role": m["role"], "content": m["content"]})
             
         with st.chat_message("assistant"):
             response_container = st.empty()
             full_text = ""
-            for chunk in generate_ai_response(msgs_full, msgs_lite):
+            for chunk in generate_ai_response(msgs):
                 full_text += chunk
                 response_container.markdown(full_text + "▌")
             
