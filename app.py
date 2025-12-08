@@ -12,7 +12,7 @@ import os
 # 1. CONFIGURATION
 # ==========================================
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
-geolocator = Nominatim(user_agent="shinryeong_app_final_kr", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_app_v17_hyper_specific", timeout=10)
 
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
@@ -21,7 +21,6 @@ except Exception as e:
     st.error(f"🚨 Connection Error: {e}")
     st.stop()
 
-# Session State
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "user_info_logged" not in st.session_state: st.session_state.user_info_logged = False
@@ -79,21 +78,24 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_luna
     except: pass
 
 def generate_ai_response(messages):
-    models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "llama-3.1-8b-instant"]
-    for model in models:
-        try:
-            stream = client.chat.completions.create(
-                model=model, messages=messages, temperature=0.4, max_tokens=5000, stream=True
-            )
-            full_response = ""
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    c = chunk.choices[0].delta.content
-                    full_response += c
-                    yield c
-            return
-        except: continue
-    yield "⚠️ System Busy. Please try again."
+    # Use Llama 3.3 for high-quality logic
+    try:
+        stream = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            temperature=0.7, # Increased creativity for specific details
+            max_tokens=6000,
+            top_p=1,
+            stream=True
+        )
+        full_response = ""
+        for chunk in stream:
+            if chunk.choices[0].delta.content:
+                c = chunk.choices[0].delta.content
+                full_response += c
+                yield c
+    except Exception as e:
+        yield f"Error: {e}"
 
 # ==========================================
 # 4. UI LOGIC
@@ -159,85 +161,86 @@ if not st.session_state.analysis_complete:
                     saju['Gender'] = gender
                     
                     # Handle Empty Question
-                    final_q = q_input if q_input.strip() else "나의 전반적인 사주 기질과 2025년 종합 운세 흐름"
+                    final_q = q_input if q_input.strip() else "나의 전반적인 사주 기질과 향후 3년의 대운 흐름"
                     
-                    # 2. System Prompt
+                    # 2. PROMPT ENGINEERING (The Magic Sauce)
                     sys_p = f"""
                     [SYSTEM ROLE]
-                    Act as 'Shinryeong'. Speak strictly in Korean (Hage-che style: ~하네, ~이라네).
-                    NO ENGLISH in output.
+                    Act as 'Shinryeong' (신령). You are a master Saju analyst who speaks in a wise, authoritative "Hage-che" (하게체) tone.
+                    Strictly output in {lang.upper()}.
                     
-                    [KNOWLEDGE]
-                    {KNOWLEDGE_TEXT[:3000]}
+                    [KNOWLEDGE BASE]
+                    {KNOWLEDGE_TEXT[:4000]}
                     
                     [USER DATA]
                     - Day Master (User): {saju['Day']}
                     - Structure: Year({saju['Year']}), Month({saju['Month']}), Time({saju['Time']})
                     - Concern: "{final_q}"
                     
-                    [FORMAT INSTRUCTIONS]
-                    Do NOT output the data table. Start directly with Section 1.
-                    Use these icons: 🔮, 🗡️, 👁️, ☁️, ⚡, 🛡️.
+                    [OUTPUT INSTRUCTIONS - BE SHOCKINGLY SPECIFIC]
+                    1. Do NOT be generic. Never say "You are kind." Say "You have the stubbornness of a Mountain blocked by a River."
+                    2. Use **Bold** for key terms.
+                    3. Do not output the table (I will do it). Start with Section 1.
                     
-                    ### 🔮 1. 타고난 명(命)과 기질
-                    (Analyze the Day Master & Season. Use nature metaphors.)
+                    [SECTION GUIDE]
+                    ### 🔮 1. 타고난 명(命)과 기질 (Visual Metaphor)
+                    - Visualize the chart as a landscape (e.g., "A lone pine tree in winter").
+                    - Explain the conflict between the User (Day) and their Environment (Month).
                     
-                    ### 🗡️ 2. 특별한 능력과 직업 (재능 매핑)
-                    (Analyze Sipseong/Ten Gods. Explain what 'Shik-sin' or 'Pyun-gwan' means in Korean terms.)
+                    ### 🗡️ 2. 특별한 능력과 직업 (Specific Career Mapping)
+                    - Analyze the 'Ten Gods' (Sipseong).
+                    - If 'Hurting Officer' is strong: Recommend "Lawyer, Critic, Youtuber".
+                    - If 'Resource' is strong: Recommend "Professor, Researcher, Writer".
+                    - Be specific about job titles.
                     
-                    ### 👁️ 3. 신령의 공명 (Accuracy Check)
-                    (Ask a question about a past event based on a recent clash year.)
+                    ### 👁️ 3. 신령의 공명 (The "Shock" Question)
+                    - Look for a Clash (Chung) or Harm (Hyeong) in the pillars.
+                    - Ask a question about a SPECIFIC event in the past (e.g., "Did you undergo surgery or a breakup in 2022?").
+                    - Mention the specific organ health (e.g., "Watch out for your stomach/digestive system due to Earth clash").
                     
-                    ### ☁️ 4. 가까운 미래의 흐름
-                    (Predict 2025/2026 energy flow.)
+                    ### ☁️ 4. 가까운 미래의 흐름 (Prediction)
+                    - Predict the energy for 2025 (Eul-Sa Year).
+                    - Is it a year of 'Movement' (Yeokma)? 'Romance' (Dohwa)? 'Money' (Jae-seong)?
                     
-                    ### ⚡ 5. 당신의 고민에 대한 신령의 해답
-                    (Answer: "{final_q}")
+                    ### ⚡ 5. 고민에 대한 해답
+                    - Answer: "{final_q}"
                     
-                    ### 🛡️ 6. 신령의 처방
-                    (Actionable advice.)
+                    ### 🛡️ 6. 신령의 처방 (Detailed Action Plan)
+                    - **행동 (Action):** Specific habit (e.g., "Start a blog", "Move south").
+                    - **아이템 (Item):** Specific color and object (e.g., "Gold ring on left hand", "Red painting").
+                    - **이유 (Why):** Explain the elemental balance.
                     
                     [[TECHNICAL_SECTION]]
-                    (Explain technical logic.)
+                    (Explain the technical Saju derivation here.)
                     """
                     
                     st.session_state.saju_context = sys_p
                     st.session_state.user_q = final_q
                     st.session_state.saju_data = saju
-                    st.session_state.analysis_complete = True # Unlock Chat
+                    st.session_state.analysis_complete = True
                     
-                    # 3. Generate Initial Report
-                    msgs = [{"role": "system", "content": sys_p}, {"role": "user", "content": "Analyze now."}]
-                    
-                    # Store User's "Invisible" prompt to history
+                    msgs = [{"role": "system", "content": sys_p}, {"role": "user", "content": "Analyze deeply now."}]
                     st.session_state.messages.append({"role": "user", "content": f"사주 분석 요청: {final_q}"})
                     
-                    # Stream Response
-                    full_text = ""
-                    response_container = st.empty() # Placeholder for streaming
-                    
-                    # Render Table MANUALLY first (Python Side)
+                    # Manual Table Render
                     table_md = f"""
                     ### 📜 신령의 분석 보고서
                     | 구분 | 내용 |
                     | :--- | :--- |
                     | **생년월일** | {b_date} ({cal}) |
-                    | **태어난 시간** | {b_time} |
-                    | **태어난 곳** | {saju['Birth_Place']} |
-                    | **성별** | {gender} |
-                    | **사주(간지)** | {saju['Year']} (년) / {saju['Month']} (월) / {saju['Day']} (일) / {saju['Time']} (시) |
-                    | **분석 주제** | {final_q} |
-                    
+                    | **사주** | {saju['Year']} (년) / {saju['Month']} (월) / {saju['Day']} (일) / {saju['Time']} (시) |
+                    | **주제** | {final_q} |
                     ---
                     """
                     st.markdown(table_md)
                     
-                    # Stream AI
+                    full_text = ""
+                    response_container = st.empty()
                     for chunk in generate_ai_response(msgs):
                         full_text += chunk
-                        # We don't stream to container here to avoid overwriting the table immediately
+                        response_container.markdown(full_text + "▌")
                     
-                    # Split and Save
+                    response_container.empty()
                     if "[[TECHNICAL_SECTION]]" in full_text:
                         main_r, tech_r = full_text.split("[[TECHNICAL_SECTION]]")
                     else:
@@ -253,13 +256,12 @@ if not st.session_state.analysis_complete:
                         save_to_database(saju, b_date, b_time, final_q, is_lunar)
                         st.session_state.user_info_logged = True
                         
-                    st.rerun() # Force UI refresh to show chat input
+                    st.rerun()
                 else:
                     st.error(t["geo_error"])
 
 # --- CHAT MODE ---
 else:
-    # Render History
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
@@ -267,11 +269,11 @@ else:
                 with st.expander("📚 분석 근거"):
                     st.markdown(m["theory"])
     
-    # Input
     if p := st.chat_input(t["chat_placeholder"]):
         st.session_state.messages.append({"role": "user", "content": p})
         with st.chat_message("user"): st.markdown(p)
         
+        # Context Management
         msgs = [{"role": "system", "content": st.session_state.saju_context}]
         for m in st.session_state.messages[-4:]:
             msgs.append({"role": m["role"], "content": m["content"]})
