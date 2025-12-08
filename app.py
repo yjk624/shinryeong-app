@@ -15,10 +15,10 @@ if "lang" not in st.session_state: st.session_state.lang = "ko"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
-if "run_analysis" not in st.session_state: st.session_state.run_analysis = False # State flag
+if "context_ready" not in st.session_state: st.session_state.context_ready = False # New flag to indicate context is saved
 
 # API Setup
-geolocator = Nominatim(user_agent="shinryeong_v10_final", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_v11_final", timeout=10)
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -32,7 +32,7 @@ except Exception as e:
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.5 (최종 안정화)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v11.0 (최종 안정화)",
         "sidebar_title": "설정",
         "lang_btn": "English Mode",
         "reset_btn": "새로운 상담 시작",
@@ -49,7 +49,7 @@ UI_TEXT = {
     },
     "en": {
         "title": "🔮 Shinryeong Destiny Report",
-        "caption": "Authentic Saju Analysis System v10.5 (Final Stability)",
+        "caption": "Authentic Saju Analysis System v11.0 (Final Stability)",
         "sidebar_title": "Settings",
         "lang_btn": "한국어 모드",
         "reset_btn": "Reset Session",
@@ -67,7 +67,7 @@ UI_TEXT = {
 }
 
 # ==========================================
-# 2. CORE LOGIC ENGINE (v10.5)
+# 2. CORE LOGIC ENGINE (v11.0)
 # ==========================================
 def get_coordinates(city_input):
     clean = city_input.strip()
@@ -84,13 +84,13 @@ def get_ganji_year(year):
 
 def analyze_heavy_logic(saju_data):
     """
-    Final logic for robust fact injection.
+    Comprehensive analysis including all requested facts.
     """
     day_stem = saju_data['Day'][0]
     month_branch = saju_data['Month'][3]
     full_str = saju_data['Year'] + saju_data['Month'] + saju_data['Day'] + saju_data['Time']
     
-    # 1. Strength Calculation (Retained fix)
+    # 1. Strength Calculation
     season_elem_map = {'인': '목', '묘': '목', '진': '목', '사': '화', '오': '화', '미': '화', '신': '금', '유': '금', '술': '금', '해': '수', '자': '수', '축': '수'}
     day_elem_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
     my_elem = day_elem_map.get(day_stem, '토')
@@ -117,7 +117,7 @@ def analyze_heavy_logic(saju_data):
     
     # 3. Shinsal (살) Injection
     shinsal_list = []
-    if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 이동과 변화")
+    if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 활동성 강함, 이동과 변화")
     if any(x in full_str for x in ["자", "오", "묘", "유"]): shinsal_list.append("도화살(桃花煞): 인기를 끌고 주목받는 매력")
     if any(x in full_str for x in ["갑", "신", "묘", "오"]): shinsal_list.append("현침살(懸針煞): 예민한 감각, 정밀한 기술")
     shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "평온한 기운"
@@ -179,11 +179,11 @@ with st.sidebar:
     t = UI_TEXT[st.session_state.lang]
     st.title(t["sidebar_title"])
     
-    # DIAGNOSTIC PANEL (Always visible)
+    # DIAGNOSTIC PANEL 
     with st.expander("🛠️ System Diagnostic", expanded=False):
         st.caption(f"Status: {'✅ Complete' if st.session_state.analysis_complete else '❌ Pending'}")
         st.caption(f"Msg Count: {len(st.session_state.messages)}")
-        st.caption(f"Run Flag: {st.session_state.run_analysis}")
+        st.caption(f"Context Ready: {st.session_state.context_ready}") # Use context_ready flag for debug
 
     if st.button(t["lang_btn"]):
         st.session_state.lang = "en" if st.session_state.lang == "ko" else "ko"
@@ -198,7 +198,32 @@ st.title(t["title"])
 st.caption(t["caption"])
 st.warning(f"**[{t['warn_title']}]**\n\n{t['warn_text']}")
 
-# [STATE A] INPUT FORM (Saves Context and Triggers Rerun)
+# ==========================================
+# 4. CRITICAL EXECUTION BLOCK
+# ==========================================
+# **FIX: Generate the report unconditionally if context is ready but history is empty.**
+if st.session_state.context_ready and not st.session_state.analysis_complete:
+    st.session_state.context_ready = False # Consume flag
+    
+    # Execute generation safely within a spinner
+    with st.spinner(t["loading"]):
+        msgs = [{"role": "system", "content": st.session_state.saju_context}, 
+                {"role": "user", "content": "Analyze."}]
+        
+        full_resp = generate_ai_response(msgs, st.session_state.lang) 
+        
+        if full_resp.startswith("⚠️ AI 연결 지연"):
+            st.error(full_resp)
+            # Re-enable form by setting analysis_complete to False if failure happens here
+            st.session_state.analysis_complete = False 
+        else:
+            st.session_state.messages.append({"role": "assistant", "content": full_resp})
+            st.session_state.analysis_complete = True
+        
+        # Rerun once to display the final state/message cleanly
+        st.rerun()
+
+# [STATE A] INPUT FORM
 if not st.session_state.analysis_complete:
     with st.form("main_form"):
         c1, c2 = st.columns(2)
@@ -222,7 +247,7 @@ if not st.session_state.analysis_complete:
                                            time_val.hour, time_val.minute, coords[0], coords[1])
                     facts = analyze_heavy_logic(saju)
                     
-                    # 1. Prompt Setup (Store the full script)
+                    # Store context and set the trigger flag
                     if st.session_state.lang == "ko":
                         titles = {"t1": "1. 🐅 타고난 그릇과 기질", "t2": "2. ☁️ 다가올 미래의 흐름과 리스크 (3년)", "t3": "3. ⚡ 신령의 처방 및 개운", "s1": "행동", "s2": "마인드셋", "s3": "개운법"}
                     else:
@@ -251,38 +276,17 @@ Trigger
 * **{titles['s3']}:** (Color: {facts['lucky_color']})
 """
                     st.session_state.saju_context = sys_p
-                    st.session_state.run_analysis = True # CRITICAL: Flag to run generation in the next cycle
+                    st.session_state.context_ready = True # Set flag for unconditional execution block
                     
-                    st.rerun()
+                    st.rerun() # Clean transition to the execution block
 
-# [STATE B] CHAT INTERFACE (The Execution and Display Block)
+# [STATE B] CHAT INTERFACE
 else:
-    # 1. Execute Initial Generation (If flag is set)
-    if st.session_state.run_analysis:
-        st.session_state.run_analysis = False # Consume the flag
-
-        # Execute generation safely within a spinner
-        with st.spinner(t["loading"]):
-            msgs = [{"role": "system", "content": st.session_state.saju_context}, 
-                    {"role": "user", "content": "Analyze."}]
-            
-            # Generate the response (Blocking call)
-            full_resp = generate_ai_response(msgs, st.session_state.lang) 
-            
-            # Save message and update state
-            if full_resp.startswith("⚠️ AI 연결 지연"):
-                st.session_state.messages.append({"role": "assistant", "content": full_resp})
-            else:
-                st.session_state.messages.append({"role": "assistant", "content": full_resp})
-                
-            # Transition state to display history cleanly (No Rerun needed here)
-
-
-    # 2. Display History (This will naturally display the message saved above)
+    # 1. Display History
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
         
-    # 3. Follow-up Input
+    # 2. Follow-up Input
     if q := st.chat_input(t["placeholder"]):
         st.session_state.messages.append({"role": "user", "content": q})
         with st.chat_message("user"): st.markdown(q)
