@@ -1,68 +1,40 @@
 import streamlit as st
-import google.generativeai as genai
+from groq import Groq
 from saju_engine import calculate_saju_v3
 from datetime import datetime, time
 from geopy.geocoders import Nominatim
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import time as time_lib # Renamed to avoid conflict with datetime.time
+import json
 
 # ==========================================
-# 1. RETRY-ENABLED MODEL LOADER
+# 1. CONFIGURATION (GROQ ENGINE)
 # ==========================================
-def get_working_model(api_key):
-    genai.configure(api_key=api_key)
-    
-    # We strictly target 1.5-Flash first because it is the designated "Free Tier" model.
-    # We AVOID "latest" aliases because they redirect to 2.5/Paid.
-    candidates = [
-        "models/gemini-1.5-flash",
-        "models/gemini-1.5-flash-001",
-        "models/gemini-1.5-flash-002",
-        "models/gemini-2.0-flash-exp", # Sometimes free
-        "models/gemini-2.0-flash"      # Sometimes free
-    ]
-    
-    for model_name in candidates:
-        try:
-            model = genai.GenerativeModel(model_name)
-            # Validation Test
-            model.generate_content("test")
-            return model, model_name
-        except Exception as e:
-            # If 429 (Quota), we might need to wait, but usually we just skip to the next model
-            continue
-            
-    return None, None
+geolocator = Nominatim(user_agent="shinryeong_app_groq")
 
-# ==========================================
-# 2. SETUP
-# ==========================================
-geolocator = Nominatim(user_agent="shinryeong_final_v6")
-
+# Initialize Groq Client
 try:
-    API_KEY = st.secrets["GEMINI_API_KEY"]
-    model, model_name = get_working_model(API_KEY)
-    
-    if model is None:
-        st.error("🚨 Account Limit Reached: Your Google Cloud account currently has 'Limit: 0' for all tested models. This usually resolves in 24 hours or by adding a billing account (Free Tier available).")
-        st.stop()
-        
+    GROQ_KEY = st.secrets["GROQ_API_KEY"]
+    client = Groq(api_key=GROQ_KEY)
+    # Test Connection
+    client.chat.completions.create(
+        messages=[{"role": "user", "content": "test"}],
+        model="llama3-70b-8192",
+    )
 except Exception as e:
-    st.error(f"Setup Error: {e}")
+    st.error(f"🚨 Connection Error: {e}")
+    st.stop()
 
 # Initialize Session State
-if "chat_session" not in st.session_state:
-    st.session_state.chat_session = None  
 if "messages" not in st.session_state:
-    st.session_state.messages = []        
+    st.session_state.messages = []
 if "saju_context" not in st.session_state:
-    st.session_state.saju_context = ""    
+    st.session_state.saju_context = ""
 if "user_info_logged" not in st.session_state:
-    st.session_state.user_info_logged = False 
+    st.session_state.user_info_logged = False
 
 # ==========================================
-# 3. DATABASE FUNCTION
+# 2. DATABASE FUNCTION
 # ==========================================
 def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
     try:
@@ -70,8 +42,8 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
-        sheet = client.open("Shinryeong_User_Data").sheet1
+        gs_client = gspread.authorize(creds)
+        sheet = gs_client.open("Shinryeong_User_Data").sheet1
         
         row = [
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -90,7 +62,7 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
         pass
 
 # ==========================================
-# 4. CITY DB
+# 3. HELPER FUNCTIONS
 # ==========================================
 CITY_DB = {
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
@@ -112,8 +84,20 @@ def get_coordinates(city_name):
     except: return None
     return None
 
+def generate_ai_response(messages):
+    completion = client.chat.completions.create(
+        model="llama3-70b-8192", # Free, fast, and smart model
+        messages=messages,
+        temperature=0.7,
+        max_tokens=2048,
+        top_p=1,
+        stream=True,
+        stop=None,
+    )
+    return completion
+
 # ==========================================
-# 5. UI LAYOUT
+# 4. UI LAYOUT
 # ==========================================
 TRANS = {
     "ko": {
@@ -146,15 +130,14 @@ with st.sidebar:
     if st.button(txt["reset_btn"]):
         st.session_state.clear()
         st.rerun()
-    if model_name:
-        st.caption(f"Engine: `{model_name}`")
+    st.caption("Engine: Groq Llama-3")
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
 st.info(txt["warning"])
 
 # ==========================================
-# 6. APP LOGIC
+# 5. APP LOGIC
 # ==========================================
 if not st.session_state.saju_context:
     with st.form("input"):
@@ -190,13 +173,18 @@ if not st.session_state.saju_context:
                     
                     st.session_state.saju_context = ctx
                     
+                    # Initial Prompt
+                    msgs = [
+                        {"role": "system", "content": ctx},
+                        {"role": "user", "content": f"User's First Concern: {q}\nAnalyze this."}
+                    ]
+                    
                     try:
-                        st.session_state.chat_session = model.start_chat(history=[])
-                        prompt = f"{ctx}\n\nUser Question: {q}\nAnalyze."
-                        resp = st.session_state.chat_session.send_message(prompt)
+                        stream = generate_ai_response(msgs)
+                        response_text = st.write_stream(stream)
                         
                         st.session_state.messages.append({"role": "user", "content": q})
-                        st.session_state.messages.append({"role": "assistant", "content": resp.text})
+                        st.session_state.messages.append({"role": "assistant", "content": response_text})
                         
                         if not st.session_state.user_info_logged:
                             save_to_database(saju, b_date, b_time, q)
@@ -215,11 +203,16 @@ else:
     if p := st.chat_input(txt["chat_placeholder"]):
         st.session_state.messages.append({"role": "user", "content": p})
         with st.chat_message("user"): st.markdown(p)
+        
+        # Prepare context + history for Groq
+        groq_messages = [{"role": "system", "content": st.session_state.saju_context}]
+        for m in st.session_state.messages:
+            groq_messages.append({"role": m["role"], "content": m["content"]})
+            
         with st.chat_message("assistant"):
-            with st.spinner("..."):
-                try:
-                    resp = st.session_state.chat_session.send_message(p)
-                    st.markdown(resp.text)
-                    st.session_state.messages.append({"role": "assistant", "content": resp.text})
-                except:
-                    st.error("Connection failed.")
+            try:
+                stream = generate_ai_response(groq_messages)
+                response_text = st.write_stream(stream)
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
+            except:
+                st.error("Connection failed.")
