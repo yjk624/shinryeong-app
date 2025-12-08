@@ -1,106 +1,292 @@
-import ephem
-import math
-from datetime import datetime, timedelta
+import streamlit as st
+from groq import Groq
+from saju_engine import calculate_saju_v3
+from datetime import datetime, time
+import time as time_module
+from geopy.geocoders import Nominatim
+from geopy.distance import great_circle
+from korean_lunar_calendar import KoreanLunarCalendar
+import json
 
 # ==========================================
-# 1. CONSTANTS
+# 0. CONFIGURATION & UI TEXTS (FIXED)
 # ==========================================
-CHEONGAN = ["갑", "을", "병", "정", "무", "기", "경", "신", "임", "계"]
-JIJI = ["자", "축", "인", "묘", "진", "사", "오", "미", "신", "유", "술", "해"]
+st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
-def get_ganji_tuple(index):
-    return (CHEONGAN[index % 10], JIJI[index % 12])
-
-def calculate_ten_gods(day_stem, target_stem):
-    stems_info = {
-        '갑': (0, 0), '을': (0, 1), '병': (1, 0), '정': (1, 1),
-        '무': (2, 0), '기': (2, 1), '경': (3, 0), '신': (3, 1),
-        '임': (4, 0), '계': (4, 1)
+# [CRITICAL FIX] UI_TEXT must be defined BEFORE use
+UI_TEXT = {
+    "ko": {
+        "title": "🔮 신령 사주리포트",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v14.0",
+        "sidebar_title": "설정",
+        "lang_btn": "English Mode",
+        "reset_btn": "새로운 상담 시작",
+        "input_dob": "생년월일",
+        "input_time": "태어난 시간",
+        "input_city": "태어난 도시 (예: 서울, 부산)",
+        "input_gender": "성별",
+        "concern_label": "당신의 고민을 구체적으로 적어주세요.",
+        "submit_btn": "📜 정밀 분석 시작",
+        "loading": "천문 데이터 계산 및 신강/신약 정밀 판별 중...",
+        "warn_title": "법적 면책 조항",
+        "warn_text": "본 분석은 통계적 참고자료이며, 의학적/법률적 효력이 없습니다.",
+        "placeholder": "추가 질문을 입력하세요..."
+    },
+    "en": {
+        "title": "🔮 Shinryeong Destiny Report",
+        "caption": "Authentic Saju Analysis System v14.0",
+        "sidebar_title": "Settings", "lang_btn": "한국어 모드", "reset_btn": "Reset Session",
+        "input_dob": "Date of Birth", "input_time": "Birth Time", "input_city": "Birth City (e.g., Seoul)",
+        "input_gender": "Gender", "concern_label": "Describe your specific concern.",
+        "submit_btn": "📜 Start Analysis", "loading": "Calculating Astral Data...",
+        "warn_title": "Legal Disclaimer", "warn_text": "Reference only.",
+        "placeholder": "Ask follow-up questions..."
     }
-    if day_stem not in stems_info or target_stem not in stems_info: return ""
-    me, me_yin = stems_info[day_stem]
-    tgt, tgt_yin = stems_info[target_stem]
-    diff = (tgt - me) % 5
-    same_yin = (me_yin == tgt_yin)
-    patterns = {
-        0: ("비견", "겁재"), 1: ("식신", "상관"), 2: ("편재", "정재"),
-        3: ("편관", "정관"), 4: ("편인", "정인")
-    }
-    return patterns[diff][0] if same_yin else patterns[diff][1]
+}
 
-def calculate_shinsal(full_str):
-    shinsal = []
-    if any(c in full_str for c in "인신사해"): shinsal.append("역마살(이동/변화)")
-    if any(c in full_str for c in "자오묘유"): shinsal.append("도화살(인기/매력)")
-    if any(c in full_str for c in "진술축미"): shinsal.append("화개살(예술/고독)")
-    if any(c in full_str for c in "갑신묘오"): shinsal.append("현침살(예민/기술)")
-    if ("진" in full_str and "해" in full_str) or ("사" in full_str and "술" in full_str):
-        shinsal.append("원진살(애증/갈등)")
-    return shinsal
+# Initialize State
+if "lang" not in st.session_state: st.session_state.lang = "ko"
+if "messages" not in st.session_state: st.session_state.messages = []
+if "saju_context" not in st.session_state: st.session_state.saju_context = ""
+if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
+if "saju_data_dict" not in st.session_state: st.session_state.saju_data_dict = {} 
+if "raw_input_data" not in st.session_state: st.session_state.raw_input_data = None
 
-def gregorian_to_jd(year, month, day):
-    """Astronomical Julian Day Calculation for perfect Ganji accuracy."""
-    if month <= 2:
-        year -= 1
-        month += 12
-    A = math.floor(year / 100)
-    B = 2 - A + math.floor(A / 4)
-    JD = math.floor(365.25 * (year + 4716)) + math.floor(30.6001 * (month + 1)) + day + B - 1524.5
-    return JD
+# API Setup
+geolocator = Nominatim(user_agent="shinryeong_v14_final", timeout=10)
+try:
+    GROQ_KEY = st.secrets["GROQ_API_KEY"]
+    client = Groq(api_key=GROQ_KEY)
+except Exception as e:
+    st.error(f"System Error: {e}")
+    st.stop()
 
-def calculate_saju_v3(year, month, day, hour, minute, lat, lon):
-    # 1. Observer Setup
-    observer = ephem.Observer()
-    observer.lat = str(lat)
-    observer.lon = str(lon)
-    birth_date_kst = datetime(year, month, day, hour, minute)
-    observer.date = birth_date_kst - timedelta(hours=9)
+# ==========================================
+# 1. HELPER FUNCTIONS
+# ==========================================
+CITY_DB = {
+    "서울": (37.56, 126.97), "부산": (35.17, 129.07), "인천": (37.45, 126.70), 
+    "대구": (35.87, 128.60), "창원": (35.22, 128.68), "광주": (35.15, 126.85),
+    "대전": (36.35, 127.38), "울산": (35.53, 129.31), "제주": (33.49, 126.53),
+    "seoul": (37.56, 126.97), "busan": (35.17, 129.07), "changwon": (35.22, 128.68)
+}
 
-    # 2. Solar Longitude (Season)
-    sun = ephem.Sun(observer)
-    sun.compute(observer)
-    sun_lon_deg = math.degrees(ephem.Ecliptic(sun).lon)
-    if sun_lon_deg < 0: sun_lon_deg += 360
+def get_coordinates(city_input):
+    clean = city_input.strip().lower()
+    if clean in CITY_DB: return CITY_DB[clean], city_input
+    try:
+        loc = geolocator.geocode(city_input)
+        if loc: return (loc.latitude, loc.longitude), city_input
+    except: pass
+    return None, None # Skip complex fallback to save time/error
 
-    # 3. YEAR PILLAR
-    # 입춘(315도) 기준
-    saju_year = year - 1 if (month <= 2 and 270 <= sun_lon_deg < 315) else year
-    # 1924 = 갑자(0). (Year - 1924) % 60
-    year_ganji_idx = (saju_year - 1924) % 60
-    year_stem, year_branch = get_ganji_tuple(year_ganji_idx)
+def convert_lunar_to_solar(year, month, day, is_intercalary):
+    try:
+        calendar = KoreanLunarCalendar()
+        calendar.setLunarDate(year, month, day, is_intercalary)
+        return datetime(calendar.solarYear, calendar.solarMonth, calendar.solarDay).date()
+    except: return None
 
-    # 4. MONTH PILLAR
-    # 12절기 기준 월 할당
-    term_deg = (sun_lon_deg - 315) if sun_lon_deg >= 315 else (sun_lon_deg + 45)
-    month_idx = int(term_deg // 30) % 12
-    # 년간두법 (Year Stem -> Month Stem)
-    y_stem_idx = CHEONGAN.index(year_stem)
-    m_stem_idx = ((y_stem_idx % 5) * 2 + 2 + month_idx) % 10
-    month_stem, month_branch = CHEONGAN[m_stem_idx], JIJI[(2 + month_idx) % 12]
-
-    # 5. DAY PILLAR (Julian Day Method - 100% Accurate)
-    # Reference: 1900-01-01 was Gap-Sul (Index 10). JD at noon was 2415021.0
-    jd = gregorian_to_jd(year, month, day)
-    # JD 2415021 (1900/1/1) -> Index 10
-    # Difference from ref
-    day_offset = int(jd - 2415021 + 0.5) 
-    day_ganji_idx = (10 + day_offset) % 60
-    day_stem, day_branch = get_ganji_tuple(day_ganji_idx)
-
-    # 6. TIME PILLAR
-    time_idx = ((hour + 1) // 2) % 12
-    d_stem_idx = CHEONGAN.index(day_stem)
-    t_stem_idx = ((d_stem_idx % 5) * 2 + time_idx) % 10
-    time_stem, time_branch = CHEONGAN[t_stem_idx], JIJI[time_idx]
-
-    full_str = f"{year_stem}{year_branch} {month_stem}{month_branch} {day_stem}{day_branch} {time_stem}{time_branch}"
+# ==========================================
+# 2. LOGIC ENGINE (Advanced Fact Injection)
+# ==========================================
+def analyze_logic_v14(saju_res):
+    """
+    Determines Strength, Pattern, and generates specific Advice strings.
+    """
+    dm = saju_res['Day_Stem']
+    season = saju_res['Month_Branch']
+    full_str = saju_res['Full_String']
     
+    # 1. Elements
+    elem_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
+    season_map = {'인':'목','묘':'목','진':'토','사':'화','오':'화','미':'토','신':'금','유':'금','술':'토','해':'수','자':'수','축':'토'}
+    
+    my_elem = elem_map[dm]
+    season_elem = season_map[season]
+    
+    # 2. Supporters
+    supporters = []
+    if my_elem == '목': supporters = ['수', '목']
+    elif my_elem == '화': supporters = ['목', '화']
+    elif my_elem == '토': supporters = ['화', '토']
+    elif my_elem == '금': supporters = ['토', '금']
+    elif my_elem == '수': supporters = ['금', '수']
+    
+    # 3. Strength Calculation (Fix for Summer Water)
+    score = 0
+    if season_elem in supporters: score += 50 
+    else: score -= 30 # Sil-ryeong penalty
+    
+    # Count supporters
+    for char in full_str:
+        c_e = '토'
+        if char in "갑을인묘": c_e = '목'
+        elif char in "병정사오": c_e = '화'
+        elif char in "경신신유": c_e = '금'
+        elif char in "임계해자": c_e = '수'
+        if c_e in supporters: score += 10
+            
+    if score >= 40:
+        strength = "신강(Strong - 주도적)"
+        advice_base = "자신의 에너지를 밖으로 표출하고 리드해야 운이 풀림."
+    else:
+        strength = "신약(Sensitive - 섬세함)"
+        advice_base = "환경에 민감하므로, 좋은 사람(귀인)을 곁에 두고 실리를 챙겨야 함."
+
+    # 4. Pattern Detection (Jae-da-sin-yak)
+    wealth_map = {'목':'토', '화':'금', '토':'수', '금':'목', '수':'화'}
+    my_wealth = wealth_map[my_elem]
+    
+    wealth_count = 0
+    for char in full_str:
+        c_e = '토'
+        if char in "갑을인묘": c_e = '목'
+        elif char in "병정사오": c_e = '화'
+        elif char in "경신신유": c_e = '금'
+        elif char in "임계해자": c_e = '수'
+        if c_e == my_wealth: wealth_count += 1
+        
+    pattern = "일반격"
+    if "신약" in strength and wealth_count >= 3:
+        pattern = "재다신약(財多身弱)"
+        advice_base = "재물 욕심은 많으나 쥘 힘이 부족함. 돈을 쫓으면 건강을 잃으니, 공부(자격증)나 사람(인맥)을 먼저 얻어야 돈이 따라옴."
+
+    # 5. Metaphor
+    metaphor_db = {
+        '갑': "거목(Pioneer)", '을': "화초(Survivor)", '병': "태양(Visionary)", '정': "촛불(Mentor)",
+        '무': "태산(Guardian)", '기': "대지(Cultivator)", '경': "바위(Warrior)", '신': "보석(Specialist)",
+        '임': "바다(Strategist)", '계': "봄비(Intuitive)"
+    }
+    
+    # 6. Shinsal
+    shinsal_summary = ", ".join(saju_res['Shinsal']) if saju_res['Shinsal'] else "평온함"
+
     return {
-        "Year": f"{year_stem}{year_branch}", "Month": f"{month_stem}{month_branch}",
-        "Day": f"{day_stem}{day_branch}", "Time": f"{time_stem}{time_branch}",
-        "Day_Stem": day_stem, "Month_Branch": month_branch,
-        "Full_String": full_str,
-        "Ten_Gods": {
-            "Year": calculate_ten_gods(day_stem, year_stem),
-            "Month": calculate_ten_gods(day_stem, month_stem),
-            "Time
+        "identity": dm, "metaphor": metaphor_db.get(dm, "기운"),
+        "strength": strength, "pattern": pattern, "advice": advice_base,
+        "shinsal": shinsal_summary, "pillars": full_str
+    }
+
+def generate_ai_response(messages, lang_mode):
+    # Persona Injection
+    sys_instruction = """
+[CRITICAL RULE] You are 'Shinryeong' (Divine Guru). Tone: Hage-che (하게체: ~하네, ~이라네).
+Language: KOREAN ONLY. No English/German.
+Format: Use the provided JSON data. 
+Visuals: Insert 
+
+[Image of Five Elements Cycle]
+ when explaining balance.
+Task: Write a detailed report. Explain terms like '신강', '재다신약', '도화살' simply.
+"""
+    if messages[0]['role'] == 'system':
+        messages[0]['content'] += f"\n{sys_instruction}"
+        
+    models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]
+    for model in models:
+        try:
+            stream = client.chat.completions.create(
+                model=model, messages=messages, temperature=0.5, max_tokens=3500
+            )
+            return stream.choices[0].message.content
+        except: time_module.sleep(0.5); continue
+    return "⚠️ 신령이 응답하지 못했습니다."
+
+# ==========================================
+# 3. MAIN UI FLOW
+# ==========================================
+with st.sidebar:
+    st.title("⚙️ 설정")
+    if st.button("🔄 리셋"):
+        st.session_state.clear()
+        st.rerun()
+
+t = UI_TEXT[st.session_state.lang]
+st.title(t["title"])
+st.caption("음력/윤달 지원 & 정밀 분석 엔진 v14.0")
+st.warning(f"**[{t['warn_title']}]**\n\n{t['warn_text']}")
+
+if not st.session_state.analysis_complete:
+    with st.form("input_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            input_date = st.date_input(t["input_dob"], min_value=datetime(1940,1,1))
+            time_val = st.time_input(t["input_time"], value=time(12,0))
+            is_lunar = st.checkbox("음력 (Lunar)", value=False)
+            is_intercalary = st.checkbox("윤달", value=False, disabled=not is_lunar)
+        with c2:
+            gender = st.radio(t["input_gender"], ["남성", "여성"])
+            city = st.text_input(t["input_city"])
+        
+        concern = st.text_area(t["concern_label"], height=80)
+        submit = st.form_submit_button(t["submit_btn"])
+    
+    if submit:
+        if not city: 
+            st.error("⚠️ 도시를 입력해주세요.")
+        else:
+            with st.spinner("⏳ 신령이 천문 데이터를 계산 중입니다..."):
+                coords, city_name = get_coordinates(city)
+                if not coords:
+                    st.error(f"❌ '{city}' 위치 확인 불가.")
+                else:
+                    # 1. Lunar Convert
+                    final_date = input_date
+                    if is_lunar:
+                        final_date = convert_lunar_to_solar(input_date.year, input_date.month, input_date.day, is_intercalary)
+                        if not final_date:
+                            st.error("❌ 날짜 변환 오류.")
+                            st.stop()
+                        st.info(f"ℹ️ 음력 {input_date} -> 양력 {final_date}")
+
+                    # 2. Engine Call
+                    saju_res = calculate_saju_v3(final_date.year, final_date.month, final_date.day, 
+                                               time_val.hour, time_val.minute, coords[0], coords[1])
+                    
+                    # 3. Logic & AI
+                    facts = analyze_logic_v14(saju_res)
+                    st.session_state.saju_data_dict = facts
+                    st.session_state.raw_input_data = {"date": str(final_date), "concern": concern}
+                    
+                    sys_p = f"""
+[DATA]
+Identity: {facts['metaphor']} (DM: {facts['identity']})
+Strength: {facts['strength']}
+Pattern: {facts['pattern']}
+Shinsal: {facts['shinsal']}
+Advice: {facts['advice']}
+Concern: "{concern}"
+[TASK] Write detailed report in Korean (Hage-che). Focus on the 'Advice' provided in DATA.
+"""
+                    st.session_state.saju_context = sys_p
+                    msgs = [{"role": "system", "content": sys_p}, 
+                            {"role": "user", "content": "분석 보고서 작성."}]
+                    
+                    full_resp = generate_ai_response(msgs, st.session_state.lang)
+                    st.session_state.messages.append({"role": "assistant", "content": full_resp})
+                    st.session_state.analysis_complete = True
+                    st.rerun()
+
+else:
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]): st.markdown(m["content"])
+        
+    if q := st.chat_input(t["placeholder"]):
+        st.session_state.messages.append({"role": "user", "content": q})
+        with st.chat_message("user"): st.markdown(q)
+        
+        facts = st.session_state.saju_data_dict
+        context_msg = f"""
+[CONTEXT] User: {facts['metaphor']}. Pattern: {facts['pattern']}. Advice: {facts['advice']}.
+Question: "{q}"
+Answer specifically using the data. Do NOT repeat intro.
+"""
+        msgs = [{"role": "system", "content": context_msg}, 
+                {"role": "user", "content": q}]
+        
+        with st.chat_message("assistant"):
+            with st.spinner("..."):
+                full_resp = generate_ai_response(msgs, st.session_state.lang)
+                st.markdown(full_resp)
+                st.session_state.messages.append({"role": "assistant", "content": full_resp})
