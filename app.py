@@ -16,7 +16,6 @@ if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
 if "run_analysis" not in st.session_state: st.session_state.run_analysis = False # State flag
-if "initialized" not in st.session_state: st.session_state.initialized = False
 
 # API Setup
 geolocator = Nominatim(user_agent="shinryeong_v10_final", timeout=10)
@@ -33,7 +32,7 @@ except Exception as e:
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.3 (최종 안정화)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.4 (최종 안정화)",
         "sidebar_title": "설정",
         "lang_btn": "English Mode",
         "reset_btn": "새로운 상담 시작",
@@ -50,7 +49,7 @@ UI_TEXT = {
     },
     "en": {
         "title": "🔮 Shinryeong Destiny Report",
-        "caption": "Authentic Saju Analysis System v10.3 (Final Stability)",
+        "caption": "Authentic Saju Analysis System v10.4 (Final Stability)",
         "sidebar_title": "Settings",
         "lang_btn": "한국어 모드",
         "reset_btn": "Reset Session",
@@ -68,7 +67,7 @@ UI_TEXT = {
 }
 
 # ==========================================
-# 2. CORE LOGIC ENGINE (v10.3: Shinsal/Strength/Timeline)
+# 2. CORE LOGIC ENGINE (v10.4)
 # ==========================================
 def get_coordinates(city_input):
     clean = city_input.strip()
@@ -116,23 +115,19 @@ def analyze_heavy_logic(saju_data):
     # 2. Hanja/Metaphor Mapping
     identity_db = {'갑': "거목", '을': "화초", '병': "태양", '정': "촛불", '무': "태산", '기': "대지", '경': "바위", '신': "보석", '임': "바다", '계': "빗물"}
     
-    # 3. Shinsal (살) Injection (All types)
+    # 3. Shinsal (살) Injection
     shinsal_list = []
     if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 활동성 강함, 이동과 변화")
     if any(x in full_str for x in ["자", "오", "묘", "유"]): shinsal_list.append("도화살(桃花煞): 인기를 끌고 주목받는 매력")
     if any(x in full_str for x in ["갑", "신", "묘", "오"]): shinsal_list.append("현침살(懸針煞): 예민한 감각, 정밀한 기술")
-    if "진" in full_str or "술" in full_str or "축" in full_str or "미" in full_str: shinsal_list.append("화개살(華蓋煞): 총명함, 예술성, 고독한 연구")
-    if ("진" in full_str and "술" in full_str): shinsal_list.append("괴강살(魁罡煞): 강력한 카리스마와 리더십")
-    if "인" in full_str and "사" in full_str and "신" in full_str: shinsal_list.append("삼형살(三刑煞): 갈등, 수술, 법적 리스크")
-    
-    shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "특별한 길흉 없이 평온한 기운"
+    shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "평온한 기운"
 
     # 4. Future Trend (3 Years)
     current_year = datetime.now().year
     trend_text = []
     day_branch = saju_data['Day'][3]
     clashes = {"자":"오", "축":"미", "인":"신", "묘":"유", "진":"술", "사":"해", "오":"자", "미":"축", "신":"인", "유":"묘", "술":"진", "해":"사"}
-
+    
     for y in range(current_year, current_year+3):
         stem, branch = get_ganji_year(y)
         rel_msg = "안정 (Stability)"
@@ -179,13 +174,13 @@ def generate_ai_response(messages, lang_mode):
     return "⚠️ AI 연결 지연. 잠시 후 다시 시도해주세요."
 
 # ==========================================
-# 3. UI LAYOUT & MAIN ROUTER (FIXED)
+# 3. UI LAYOUT & MAIN ROUTER (FINAL FIX)
 # ==========================================
 with st.sidebar:
     t = UI_TEXT[st.session_state.lang]
     st.title(t["sidebar_title"])
     
-    # DIAGNOSTIC PANEL 
+    # DIAGNOSTIC PANEL (Always visible)
     with st.expander("🛠️ System Diagnostic", expanded=False):
         st.caption(f"Status: {'✅ Complete' if st.session_state.analysis_complete else '❌ Pending'}")
         st.caption(f"Msg Count: {len(st.session_state.messages)}")
@@ -281,7 +276,7 @@ else:
             else:
                 st.session_state.messages.append({"role": "assistant", "content": full_resp})
                 
-            # Transition state to display history cleanly
+            # Transition state to display history cleanly (Final Rerun)
             st.rerun() 
 
 
