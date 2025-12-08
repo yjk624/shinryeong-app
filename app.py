@@ -16,7 +16,7 @@ st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v16.2 (오류 완전수정)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v16.3 (문법 완전수정)",
         "sidebar_title": "설정", "lang_btn": "English Mode", "reset_btn": "새로운 상담 시작",
         "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시",
         "input_gender": "성별", "concern_label": "당신의 고민을 구체적으로 적어주세요.",
@@ -35,7 +35,7 @@ if "saju_data_dict" not in st.session_state: st.session_state.saju_data_dict = {
 if "raw_input_data" not in st.session_state: st.session_state.raw_input_data = None
 
 # API Setup
-geolocator = Nominatim(user_agent="shinryeong_v16_2_final", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_v16_3_final", timeout=10)
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -70,11 +70,11 @@ def convert_lunar_to_solar(year, month, day, is_intercalary):
     except: return None
 
 # ==========================================
-# 2. LOGIC ENGINE (v16.2 - Syntax Fixed)
+# 2. LOGIC ENGINE (v16.3 - Syntax Safe)
 # ==========================================
 def analyze_logic_v16(saju_res):
     """
-    Constructs the NARRATIVE directly in Python.
+    Constructs the NARRATIVE directly in Python to prevent AI hallucination.
     """
     dm = saju_res['Day_Stem']
     season = saju_res['Month_Branch']
@@ -98,7 +98,7 @@ def analyze_logic_v16(saju_res):
     # 3. Strength Scoring
     score = 0
     if season_elem in supporters: score += 50
-    else: score -= 50 
+    else: score -= 50 # Penalize for Sil-ryeong
     
     for char in full_str:
         if char == ' ': continue
@@ -133,11 +133,11 @@ def analyze_logic_v16(saju_res):
         if ce == my_wealth: wealth_count += 1
         
     pattern = "일반격"
-    # [FIXED: String Syntax Error Solved]
-    advice_core = "오행의 균형을 맞추는 것이 중요하네. 
+    # [FIXED: TRIPLE QUOTES USED]
+    advice_core = """오행의 균형을 맞추는 것이 중요하네. 
 
 [Image of Five Elements Cycle]
-" 
+"""
     
     if "신약" in strength and wealth_count >= 3:
         pattern = "재다신약(財多身弱 - 재물은 많으나 가질 힘이 약함)"
@@ -216,7 +216,7 @@ with st.sidebar:
 
 t = UI_TEXT["ko"] # Force Korean context
 st.title(t["title"])
-st.caption("음력/윤달 지원 & 정밀 분석 엔진 v16.2")
+st.caption("음력/윤달 지원 & 정밀 분석 엔진 v16.3")
 st.warning(f"**[{t['warn_title']}]**\n\n{t['warn_text']}")
 
 # A. Input Form
