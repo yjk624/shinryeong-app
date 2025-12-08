@@ -13,7 +13,7 @@ import json
 st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
 # CRITICAL FIX: Initialize all keys safely at the top.
-if "lang" not in st.session_state: st.session_state.lang = "ko"
+if "lang" not in st.session_state: st.sessionin_state.lang = "ko"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
@@ -86,7 +86,6 @@ def get_coordinates(city_input):
     # 3. Nearest Neighbor Fallback (Crucial for unlisted sub-cities)
     if city_input and any(c.isalpha() for c in city_input):
         try:
-            # Use Nominatim briefly for an approximate point to start search from
             approx_loc = geolocator.geocode(city_input, timeout=5)
             if approx_loc:
                 min_distance = float('inf')
@@ -132,7 +131,17 @@ def analyze_heavy_logic(saju_data, coords):
     }
 
 def generate_ai_response(messages, lang_mode):
-    # (LLM stability logic is assumed)
+    # System Instruction Injection (Tighter language control)
+    instruction = (
+        "[CRITICAL INSTRUCTION]\n"
+        f"Language: {lang_mode.upper()} ONLY. DO NOT use English, Chinese, or German words in the output text body.\n"
+        "Persona: Use the formal and mystical '하게체' (~하네, ~라네).\n"
+        "If Korean: Use Titles: '1. 타고난 그릇', '2. 미래 흐름', '3. 신령의 처방'.\n"
+        "Explain complex terms (신강, 신약, 역마살) in simple Korean sentences immediately after mentioning them.\n"
+    )
+    if messages[0]['role'] == 'system':
+        messages[0]['content'] += "\n" + instruction
+    
     models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"]
     
     for model in models:
@@ -151,13 +160,12 @@ def generate_ai_response(messages, lang_mode):
     return "⚠️ AI 연결 지연. 잠시 후 다시 시도해주세요."
 
 # ==========================================
-# 4. PRIMARY EXECUTION FUNCTION (DEEP DEBUGGING)
+# 3. PRIMARY EXECUTION FUNCTION (DEEP DEBUGGING)
 # ==========================================
 
 def run_full_analysis_and_store(raw_data):
     """
     Executes all heavy Python logic, stores the result, and forces the final state transition.
-    Uses try/except blocks to pinpoint the exact failure location.
     """
     t = UI_TEXT[st.session_state.lang]
     progress_container = st.empty()
@@ -166,22 +174,28 @@ def run_full_analysis_and_store(raw_data):
     try:
         # STEP 0: Geocoding and Initial Calculation
         progress_container.info(f"[{t['loading']}] STEP 0/5: Geocoding input...")
+        
+        # --- Point of High Risk: Geocoding ---
         coords, city_name = get_coordinates(raw_data['city'])
         
         if not coords:
             # FAILURE POINT 0: Geocoding
-            raise Exception(f"GeoCoding Failed for {raw_data['city']}. Check connection or city name.")
+            st.session_state.last_error_log = f"❌ GeoCoding Failed for {raw_data['city']}."
+            raise Exception(f"GeoCoding Failed for {raw_data['city']}.")
 
-        # STEP 1: Saju Calculation (saju_engine.py)
         progress_container.info(f"STEP 1/5: Location matched to {city_name}. Calculating Saju pillars...")
+        
+        # --- Point of High Risk: Saju Engine Call ---
         saju = calculate_saju_v3(raw_data['date'].year, raw_data['date'].month, raw_data['date'].day, 
                                 raw_data['time'].hour, raw_data['time'].minute, coords[0], coords[1])
         
         # STEP 2: Heavy Logic (Metaphysical Analysis)
         progress_container.info("STEP 2/5: Saju pillars derived. Running heavy metaphysical analysis...")
+        
+        # --- Point of High Risk: Heavy Analysis Logic ---
         facts = analyze_heavy_logic(saju, coords)
 
-        # STEP 3: Prompt Construction and Context Save
+        # 3. Prompt Setup
         progress_container.info("STEP 3/5: Context generation successful. Preparing for AI call...")
         
         if st.session_state.lang == "ko":
@@ -191,15 +205,31 @@ def run_full_analysis_and_store(raw_data):
 
         sys_p = f"""
 [SYSTEM ROLE]
-You are 'Shinryeong'. Language: {st.session_state.lang.upper()}.
+You are 'Shinryeong'. Language: {st.session_state.lang.upper()}. Persona: Use the formal and mystical '하게체' (~하네, ~라네).
+[IMPORTANT: EXPLAIN COMPLEX TERMS SIMPLY. NO ENGLISH/GERMAN IN KOREAN OUTPUT.]
 Input Facts: {facts}
 User Concern: "{raw_data['concern']}"
-...
-""" # Abbreviated prompt for internal clarity
 
+[OUTPUT TEMPLATE]
+## {t['title']}
+### {titles['t1']}
+(Explain '{facts['metaphor']}'. Define '{facts['strength']}' immediately after using it. Use the Shinsal: {facts['shinsal']}. 
+Trigger 
+
+[Image of Five Elements Cycle]
+ to explain the balance.)
+### {titles['t2']}
+(Analyze the trend below.)
+{facts['trend']}
+### {titles['t3']}
+* **{titles['s1']}:** (Advice)
+* **{titles['s2']}:** (Mental)
+* **{titles['s3']}:** (Color: {facts['lucky_color']})
+"""
         st.session_state.saju_context = sys_p
+        st.session_state.saju_data_dict = facts # Save structured data for chat
         
-        # STEP 4: AI Generation (Blocking Call)
+        # STEP 4: AI Generation
         progress_container.info("STEP 4/5: Sending final context to AI...")
         msgs = [{"role": "system", "content": sys_p}, {"role": "user", "content": "Analyze."}]
         full_resp = generate_ai_response(msgs, st.session_state.lang) 
@@ -213,20 +243,19 @@ User Concern: "{raw_data['concern']}"
             st.session_state.messages.append({"role": "assistant", "content": full_resp})
             st.session_state.analysis_complete = True
             st.session_state.raw_input_data = None # Clear raw data after success
-            
-        progress_container.empty()
-        st.rerun() # Final transition
+            progress_container.empty()
+            st.rerun() # Final successful transition
 
     except Exception as e:
         # CRITICAL RUNTIME ERROR CATCH
         error_msg = f"❌ Runtime Logic Error: {e}"
         st.session_state.last_error_log = error_msg
         progress_container.error(f"❌ Analysis Failed. Check logs for details. Error: {e}")
-        st.session_state.analysis_complete = False # Ensure we stay in the initial state view
+        st.session_state.analysis_complete = False 
         st.rerun() # Force full restart to show the error log
 
 # ==========================================
-# 5. UI LAYOUT & MAIN ROUTER
+# 4. UI LAYOUT & MAIN ROUTER
 # ==========================================
 
 # SIDEBAR (Always runs)
@@ -235,7 +264,7 @@ with st.sidebar:
     st.title(t["sidebar_title"])
     
     # DIAGNOSTIC PANEL (Always visible)
-    with st.expander("🛠️ System Diagnostic (DEEP LOG)", expanded=True):
+    with st.expander("🛠️ System Diagnostic (DEEP LOG)", expanded=False):
         st.caption(f"Status: {'✅ Complete' if st.session_state.analysis_complete else '❌ Pending'}")
         st.caption(f"Msg Count: {len(st.session_state.messages)}")
         st.caption("--- Last Error ---")
@@ -296,10 +325,13 @@ elif st.session_state.analysis_complete:
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
         
-    # 2. Follow-up Input
+    # 2. Follow-up Input (Leveraging the structured data in saju_data_dict)
     if q := st.chat_input(t["placeholder"]):
         st.session_state.messages.append({"role": "user", "content": q})
         with st.chat_message("user"): st.markdown(q)
+        
+        # Inject structured data into the current prompt for specific analysis
+        analysis_prompt = f"User Question: {q}\n\n[SAJU DATA CONTEXT]: {json.dumps(st.session_state.saju_data_dict)}"
         
         # Context + History
         ctxt = [{"role": "system", "content": st.session_state.saju_context}]
@@ -307,6 +339,7 @@ elif st.session_state.analysis_complete:
         
         with st.chat_message("assistant"):
             with st.spinner("..."):
-                full_resp = generate_ai_response(ctxt, st.session_state.lang)
+                # Send the detailed analysis prompt for specificity
+                full_resp = generate_ai_response(ctxt, st.session_state.lang) 
                 st.markdown(full_resp)
                 st.session_state.messages.append({"role": "assistant", "content": full_resp})
