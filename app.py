@@ -18,32 +18,37 @@ geolocator = Nominatim(user_agent="shinryeong_app_v2")
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
-    # Using 'gemini-1.5-flash' (or 'gemini-flash-latest') which supports multi-turn chat better
-    model = genai.GenerativeModel('models/gemini-flash-latest')
+    
+    # [FIX] Switched to 'gemini-1.5-flash' explicitly.
+    # This model has a much higher free quota (1,500/day) compared to 2.5 (20/day).
+    model = genai.GenerativeModel('models/gemini-1.5-flash')
+    
 except Exception as e:
     st.error(f"Secret Error: {e}")
 
-# Initialize Session State (The App's Memory)
+# Initialize Session State
 if "chat_session" not in st.session_state:
-    st.session_state.chat_session = None  # Stores the Gemini Chat Object
+    st.session_state.chat_session = None  
 if "messages" not in st.session_state:
-    st.session_state.messages = []        # Stores the visible chat history
+    st.session_state.messages = []        
 if "saju_context" not in st.session_state:
-    st.session_state.saju_context = ""    # Stores the calculated birth chart text
+    st.session_state.saju_context = ""    
 if "user_info_logged" not in st.session_state:
-    st.session_state.user_info_logged = False # Prevents duplicate DB saving
+    st.session_state.user_info_logged = False 
 
 # ==========================================
 # 2. DATABASE FUNCTION
 # ==========================================
 def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
-    """Saves initial user data to Google Sheets."""
+    """Saves user inputs AND calculated data to Google Sheets."""
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         creds_dict = dict(st.secrets["gcp_service_account"])
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
+        
+        # Make sure your sheet is named EXACTLY "Shinryeong_User_Data"
         sheet = client.open("Shinryeong_User_Data").sheet1
         
         input_date_str = birth_date_obj.strftime("%Y-%m-%d")
@@ -74,7 +79,7 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
 TRANS = {
     "ko": {
         "title": "🔮 신령 (Shinryeong)",
-        "subtitle": "AI 형이상학 분석가 (특정 주제 분석/상담)",
+        "subtitle": "AI 형이상학 분석가 (대화형 모드)",
         "warning": "💡 **알림:** 본 분석 결과는 명리학적 데이터에 기반한 참고용 자료입니다.",
         "dob_label": "생년월일",
         "time_label": "태어난 시간",
@@ -123,7 +128,7 @@ with st.sidebar:
     lang_code = "ko" if lang_choice == "한국어" else "en"
     txt = TRANS[lang_code]
     
-    # Reset Button (Clears Memory)
+    # Reset Button
     if st.button(txt["reset_btn"]):
         st.session_state.messages = []
         st.session_state.chat_session = None
@@ -170,10 +175,9 @@ if not st.session_state.saju_context:
                         saju_data['Birth_Place'] = location_input
                         saju_data['Gender'] = gender
                         
-                        # 3. Store Context in Session State (The "Hidden Memory")
+                        # 3. Store Context in Session State
                         target_output_lang = "Korean" if lang_code == "ko" else "English"
                         
-                        # This string tells the AI who the user is for the ENTIRE chat
                         context_str = f"""
                         [SYSTEM CONTEXT: USER BIRTH DATA]
                         - Saju Pillars: {saju_data}
@@ -181,28 +185,27 @@ if not st.session_state.saju_context:
                         - Location: {location_input} ({lat}, {lon})
                         - Output Language: {target_output_lang}
                         - Persona: Shinryeong (Use Hage-che tone, Easy Modern Terms)
-                        - Reference: Use Knowledge Base Vol 1-6 but do not cite them explicitly.
+                        - Rule: Do not cite "Volume 4" explicitly.
                         """
                         st.session_state.saju_context = context_str
                         
-                        # 4. Start Chat Session with History
-                        # We initiate the chat with the User's first concern
+                        # 4. Start Chat Session
                         st.session_state.chat_session = model.start_chat(history=[])
                         
                         # 5. Send Initial Prompt
                         initial_prompt = f"{context_str}\n\nUser's First Concern: {user_question}\nAnalyze this."
                         response = st.session_state.chat_session.send_message(initial_prompt)
                         
-                        # 6. Save Initial Response to visible history
+                        # 6. Save Initial Response
                         st.session_state.messages.append({"role": "user", "content": user_question})
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
                         
-                        # 7. Log to DB (Once per session)
+                        # 7. Log to DB
                         if not st.session_state.user_info_logged:
                             save_to_database(saju_data, birth_date, birth_time, user_question)
                             st.session_state.user_info_logged = True
                         
-                        st.rerun() # Refresh to show chat interface
+                        st.rerun()
 
                     else:
                         st.error(txt["geo_error"])
@@ -210,35 +213,26 @@ if not st.session_state.saju_context:
                     st.error(f"Error: {e}")
 
 # ==========================================
-# 6. CHAT INTERFACE (SHOWN AFTER ANALYSIS)
+# 6. CHAT INTERFACE
 # ==========================================
 else:
-    # A. Display Saju Summary (Top of Chat)
     st.markdown("---")
     
-    # B. Display Chat History
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # C. Handle New User Input
     if prompt := st.chat_input(txt["chat_placeholder"]):
-        # 1. Add user message to UI
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
-        # 2. Generate AI Response
         with st.chat_message("assistant"):
             with st.spinner("..."):
                 try:
-                    # We implicitly rely on the 'chat_session' object to remember history
-                    # But we remind it of the context slightly just in case
                     full_msg = f"[Context Reminder: {st.session_state.saju_context}]\nUser Question: {prompt}"
                     response = st.session_state.chat_session.send_message(full_msg)
                     st.markdown(response.text)
-                    
-                    # 3. Add AI response to history
                     st.session_state.messages.append({"role": "assistant", "content": response.text})
                 except Exception as e:
                     st.error("Connection Error. Please try again.")
