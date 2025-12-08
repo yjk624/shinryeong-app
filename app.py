@@ -3,6 +3,7 @@ from groq import Groq
 from saju_engine import calculate_saju_v3
 from datetime import datetime, time
 from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
@@ -13,7 +14,7 @@ import os
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
 
 # Robust Geocoding
-geolocator = Nominatim(user_agent="shinryeong_app_v15_pro_final", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_app_v16_final_persona", timeout=10)
 
 # Initialize Groq
 try:
@@ -46,20 +47,18 @@ KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt")
 # 3. HELPER FUNCTIONS & LOGIC
 # ==========================================
 CITY_DB = {
+    # Major Global Cities for Instant Fallback
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
     "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
     "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
     "대구": (35.87, 128.60), "Daegu": (35.87, 128.60),
     "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
     "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
-    "울산": (35.53, 129.31), "Ulsan": (35.53, 129.31),
-    "세종": (36.48, 127.28), "Sejong": (36.48, 127.28),
-    "창원": (35.22, 128.68), "Changwon": (35.22, 128.68),
-    "수원": (37.26, 127.02), "Suwon": (37.26, 127.02),
     "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
-    "강릉": (37.75, 128.87), "Gangneung": (37.75, 128.87),
+    "창원": (35.22, 128.68), "Changwon": (35.22, 128.68),
     "New York": (40.71, -74.00), "London": (51.50, -0.12),
-    "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65)
+    "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65),
+    "Los Angeles": (34.05, -118.24), "Sydney": (-33.86, 151.20)
 }
 
 def get_coordinates(city_input):
@@ -98,32 +97,21 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_luna
         sheet.append_row(row)
     except: pass
 
-# [NEW] COLD READING ENGINE
-# Calculates a "Hit" fact to make the AI look psychic
+# [COLD READING ENGINE]
 def calculate_cold_reading(saju_data):
-    """
-    Returns a specific sentence about 2024/2025 based on simple Saju logic.
-    This gives the 'How did it know?' effect.
-    """
+    """Calculates a 'Hit' fact about 2024/2025."""
     try:
-        # Extract Day Branch (e.g., "Jin" from "Mu-Jin")
-        day_pillar = saju_data['Day'] # "Mu-Jin"
-        day_branch = day_pillar.split('-')[1].split('(')[0].strip() # "Jin"
+        day_pillar = saju_data['Day'] 
+        day_branch = day_pillar.split('-')[1].split('(')[0].strip()
         
-        # Simple Logic for 2024 (Dragon/Jin Year) and 2025 (Snake/Sa Year)
-        # 1. Same Zodiac (Jihyeong) -> Stress/Headache
         if "Jin" in day_branch: 
-            return "2024년은 '자형(Self-Punishment)'의 해였으니, 스스로를 볶아대거나 남모를 속앓이를 많이 하지 않았는가?"
-        # 2. Clash (Chung) -> Change/Separation
-        elif "Sul" in day_branch: # Dog clashes with Dragon
+            return "2024년은 자형(自刑)살이 들어 스스로를 볶아대거나 남모를 속앓이를 많이 하지 않았는가?"
+        elif "Sul" in day_branch: 
             return "2024년에 큰 이동수나 인간관계의 정리가 한 차례 지나갔을 터인데, 마음의 정리가 되었는가?"
-        # 3. Water Day Master -> 2025 Snake is Wealth -> Money concerns
         elif "Im" in saju_data['Day'] or "Gye" in saju_data['Day']:
             return "다가오는 2025년은 재물운이 꿈틀거리니, 돈과 관련된 고민이 깊어지고 있지 않은가?"
-        # Default
         else:
             return "최근 1~2년 사이 환경이 급변하여, 마치 안개 속을 걷는 듯한 막막함을 느꼈을 수 있네."
-            
     except:
         return "그대의 운명에는 남들과 다른 독특한 기운이 서려있군."
 
@@ -134,8 +122,8 @@ def generate_ai_response(messages):
             stream = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                temperature=0.4, # Lower temperature for stricter adherence to facts
-                max_tokens=5000,
+                temperature=0.5,
+                max_tokens=6000, # Increased for detailed 5-section report
                 top_p=1,
                 stream=True,
                 stop=None,
@@ -169,7 +157,8 @@ TRANS = {
         "male": "남성", "female": "여성", "loc_label": "태어난 지역",
         "concern_label": "가장 큰 고민은 무엇인가요?",
         "cal_label": "양력/음력 구분",
-        "theory_header": "📚 분석 근거 (Technical Basis)"
+        "theory_header": "📚 분석 근거 (Technical Basis)",
+        "table_header_key": "구분", "table_header_val": "내용"
     },
     "en": {
         "title": "🔮 Shinryeong",
@@ -184,7 +173,8 @@ TRANS = {
         "male": "Male", "female": "Female", "loc_label": "Birth Place",
         "concern_label": "Main Concern",
         "cal_label": "Calendar",
-        "theory_header": "📚 Technical Basis"
+        "theory_header": "📚 Technical Basis",
+        "table_header_key": "Parameter", "table_header_val": "Value"
     }
 }
 
@@ -196,7 +186,7 @@ with st.sidebar:
         st.session_state.saju_context = ""
         st.session_state.user_info_logged = False
         st.rerun()
-    st.caption("Engine: Llama-3.3 (Logic Enhanced)")
+    st.caption("Engine: Llama-3.3 (Pro)")
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
@@ -235,68 +225,72 @@ if not st.session_state.saju_context:
                     saju['Birth_Place'] = city_name
                     saju['Gender'] = gender
                     
-                    # Generate Cold Reading Fact
                     cold_reading_fact = calculate_cold_reading(saju)
                     
-                    # CSV Format
+                    # Dynamic Table Headers based on Language
+                    t_key = txt['table_header_key']
+                    t_val = txt['table_header_val']
+                    
                     csv_display = f"""
-                    | Parameter | Value |
+                    | {t_key} | {t_val} |
                     | :--- | :--- |
-                    | **Date** | {b_date} ({cal_type}) |
-                    | **Time** | {b_time} |
-                    | **Location** | {city_name} |
-                    | **Gender** | {gender} |
-                    | **Saju Pillars** | Y:{saju['Year']} / M:{saju['Month']} / D:{saju['Day']} / T:{saju['Time']} |
+                    | **{txt['dob_label']}** | {b_date} ({cal_type}) |
+                    | **{txt['time_label']}** | {b_time} |
+                    | **{txt['loc_label']}** | {city_name} |
+                    | **{txt['gender_label']}** | {gender} |
+                    | **Saju** | {saju['Year']} / {saju['Month']} / {saju['Day']} / {saju['Time']} |
                     """
                     
                     # ----------------------------------------------------
-                    # ULTIMATE SYSTEM PROMPT (Fixed Identity)
+                    # ULTIMATE SYSTEM PROMPT (Pro Persona)
                     # ----------------------------------------------------
                     current_year = datetime.now().year
                     
                     system_prompt = f"""
                     [SYSTEM ROLE]
-                    You are 'Shinryeong'. Master Saju Analyst.
-                    Tone: Authoritative, Insightful, "Hage-che" (하게체).
-                    Language: STRICTLY KOREAN (한국어). No Japanese/Chinese characters unless in brackets.
+                    You are 'Shinryeong' (신령). Master Saju Analyst.
+                    **PERSONA:** You must speak in a consistent "Hage-che" (하게체) tone (e.g., ~하네, ~보이네, ~이라네). 
+                    Never use polite formal endings like '합니다' or '해요'. Be wise, mystical, yet strictly logical.
+                    Language: {lang_code.upper()} Only.
                     
                     [KNOWLEDGE BASE]
                     {KNOWLEDGE_TEXT[:3500]}
                     
-                    [USER IDENTITY - DO NOT CONFUSE THIS]
-                    - **IDENTITY (Day Master/Il-ju):** {saju['Day']} <--- THIS IS THE USER.
-                    - Environment (Month): {saju['Month']}
-                    - Ancestor (Year): {saju['Year']}
-                    - Future (Time): {saju['Time']}
+                    [USER DATA]
+                    - Identity (Day Master): {saju['Day']} (This is the USER)
+                    - Environment: {saju['Month']}
                     - Concern: "{q}"
+                    - Current Year: {current_year}
                     
-                    [COLD READING DATA]
-                    Use this fact in Section 2 to prove accuracy:
-                    "{cold_reading_fact}"
+                    [COLD READING FACT]
+                    Use this in Section 3: "{cold_reading_fact}"
                     
                     [REQUIRED OUTPUT FORMAT]
                     1. **Start with the CSV Table provided.**
-                    2. **Use these EXACT Sections:**
+                    2. **Follow this Structure EXACTLY:**
                     
                     ### 🔮 1. 타고난 명(命)과 기질
-                    (Analyze the Day Master '{saju['Day']}' deeply. Explain its relation to the Month. Use metaphors like 'Winter Ocean' or 'Burning Sun'.)
+                    (Interpret the Day Master using nature metaphors. "You are like a [Nature Element] born in [Season]...". Connect the pillars narrative-style.)
                     
                     ### 🗡️ 2. 특별한 능력과 직업 (재능 매핑)
-                    (Analyze the 'Ten Gods' (Sipseong). What is their weapon? e.g., 'Expression Star' = Art/Speech. Recommend specific careers.)
+                    (Analyze Ten Gods. Identify the user's "Superpower" (Expression, Control, Resource). Suggest specific modern career fields.)
                     
                     ### 👁️ 3. 신령의 공명 (Accuracy Check)
-                    (State the Cold Reading fact provided above confidently. Ask if it is true.)
+                    (State the Cold Reading fact provided above. Ask if this resonates.)
                     
                     ### ☁️ 4. 가까운 미래의 흐름 (Near Future)
-                    (Analyze the interaction between the User's Pillars and {current_year} and {current_year+1}.)
+                    (Predict the energy flow for {current_year} and {current_year+1}. Focus on 'Change', 'Stagnation', or 'Opportunity'.)
                     
-                    ### 🛡️ 5. 신령의 처방 (Action Plan)
+                    ### ⚡ 5. 당신의 고민에 대한 신령의 해답
+                    (Directly answer the specific question: "{q}". Do not be vague. Give a clear Yes/No/Wait verdict if possible.)
+                    
+                    ### 🛡️ 6. 신령의 처방 (Action Plan)
                     * **행동 지침:** ...
                     * **마음가짐:** ...
                     * **개운 아이템:** ...
                     
                     [[TECHNICAL_SECTION]]
-                    (Technical logic.)
+                    (Technical footnotes on why this analysis was made.)
                     """
                     
                     st.session_state.saju_context = system_prompt
@@ -320,7 +314,6 @@ if not st.session_state.saju_context:
                     else:
                         main_r, theory_r = full_text, "Analysis based on standard Saju logic."
 
-                    # Insert CSV manually at the top
                     final_display = f"### 📜 신령의 분석 보고서\n\n{csv_display}\n\n---\n\n{main_r}"
                     
                     st.markdown(final_display)
