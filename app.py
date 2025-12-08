@@ -3,6 +3,7 @@ from groq import Groq
 from saju_engine import calculate_saju_v3
 from datetime import datetime, time
 from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
@@ -11,7 +12,9 @@ import os
 # 1. CONFIGURATION
 # ==========================================
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
-geolocator = Nominatim(user_agent="shinryeong_app_v6_final")
+
+# Robust Geocoding (Increased timeout to 10s to fix "not rendering" issue)
+geolocator = Nominatim(user_agent="shinryeong_app_v7_final_fix", timeout=10)
 
 # Initialize Groq
 try:
@@ -21,33 +24,55 @@ except Exception as e:
     st.error(f"🚨 Connection Error: {e}")
     st.stop()
 
-# Initialize Session State
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "saju_context" not in st.session_state:
-    st.session_state.saju_context = ""
-if "user_info_logged" not in st.session_state:
-    st.session_state.user_info_logged = False
+# Session State
+if "messages" not in st.session_state: st.session_state.messages = []
+if "saju_context" not in st.session_state: st.session_state.saju_context = ""
+if "user_info_logged" not in st.session_state: st.session_state.user_info_logged = False
 
 # ==========================================
-# 2. FILE LOADERS (BRAIN & SOUL)
+# 2. FILE LOADERS
 # ==========================================
 @st.cache_data
 def load_text_file(filename):
-    """Reads external text files (Prompt & Knowledge)."""
     try:
         with open(filename, "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
-        return "" # Fail silently if file missing (but quality will drop)
+        return ""
 
-# LOAD THE SOUL (Persona) AND BRAIN (Knowledge)
-PROMPT_TEXT = load_text_file("prompt.txt") # Rename '신령 prompt .txt' to 'prompt.txt' on GitHub
-KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt") 
+PROMPT_TEXT = load_text_file("prompt.txt")        # The Persona
+KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt") # The Brain
 
 # ==========================================
-# 3. DATABASE FUNCTION
+# 3. HELPER FUNCTIONS
 # ==========================================
+CITY_DB = {
+    "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
+    "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
+    "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
+    "대구": (35.87, 128.60), "Daegu": (35.87, 128.60),
+    "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
+    "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
+    "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
+    "New York": (40.71, -74.00), "London": (51.50, -0.12)
+}
+
+def get_coordinates(city_name):
+    clean = city_name.strip()
+    # 1. Internal DB Check
+    if clean in CITY_DB: return CITY_DB[clean]
+    
+    # 2. API Check (with error handling)
+    try:
+        loc = geolocator.geocode(clean)
+        if loc: return (loc.latitude, loc.longitude)
+    except (GeocoderTimedOut, GeocoderServiceError):
+        return None # Return None implies failure, handled in UI
+    except Exception as e:
+        print(f"Geo Error: {e}")
+        return None
+    return None
+
 def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -73,51 +98,34 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
     except:
         pass
 
-# ==========================================
-# 4. HELPER FUNCTIONS
-# ==========================================
-CITY_DB = {
-    "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
-    "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
-    "대구": (35.87, 128.60), "Daegu": (35.87, 128.60),
-    "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
-    "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
-    "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
-    "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
-    "New York": (40.71, -74.00), "London": (51.50, -0.12)
-}
-
-def get_coordinates(city_name):
-    clean = city_name.strip()
-    if clean in CITY_DB: return CITY_DB[clean]
-    try:
-        loc = geolocator.geocode(clean, timeout=5)
-        if loc: return (loc.latitude, loc.longitude)
-    except: return None
-    return None
-
 def generate_ai_response(messages):
-    stream = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=messages,
-        temperature=0.6, # Slightly lowered for more consistent formatting
-        max_tokens=2048,
-        top_p=1,
-        stream=True,
-        stop=None,
-    )
-    for chunk in stream:
-        if chunk.choices[0].delta.content is not None:
-            yield chunk.choices[0].delta.content
+    try:
+        stream = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            temperature=0.6,
+            max_tokens=3000, # Increased for full reports
+            top_p=1,
+            stream=True,
+            stop=None,
+        )
+        full_response = ""
+        for chunk in stream:
+            if chunk.choices[0].delta.content is not None:
+                content = chunk.choices[0].delta.content
+                full_response += content
+                # yield content # Streaming disabled for Split Logic consistency
+        return full_response
+    except Exception as e:
+        return f"Error: {e}"
 
 # ==========================================
-# 5. UI LAYOUT & TRANSLATION
+# 4. UI LAYOUT
 # ==========================================
 TRANS = {
     "ko": {
         "title": "🔮 신령 (Shinryeong)",
         "subtitle": "AI 형이상학 분석가",
-        # [FIXED] Matches strict legal disclaimer from Volume 6/Prompt
         "warning": """
         ⚖️ **법적 면책 조항 (Disclaimer):**
         1. 본 서비스는 명리학 및 자미두수 데이터를 기반으로 한 **학술적 분석**이며, 절대적인 예언이 아닙니다.
@@ -126,23 +134,17 @@ TRANS = {
         """,
         "submit_btn": "🔮 신령에게 분석 요청하기",
         "loading": "⏳ 천문 데이터를 계산하고 신령을 소환하는 중...",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다. 주요 도시명으로 다시 시도해주세요.",
-        "chat_placeholder": "추가로 궁금한 점이 있으신가요? (예: 내년의 재물운은?)",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다. (서버 과부하일 수 있으니 '서울'로 테스트해보세요).",
+        "chat_placeholder": "추가로 궁금한 점이 있으신가요?",
         "reset_btn": "🔄 새로운 분석 시작",
-        "dob_label": "생년월일",
-        "time_label": "태어난 시간",
-        "gender_label": "성별",
-        "male": "남성", 
-        "female": "여성",
-        "loc_label": "태어난 지역 (도시명)",
-        "loc_placeholder": "예: 서울, 부산, 뉴욕...",
+        "dob_label": "생년월일", "time_label": "태어난 시간", "gender_label": "성별",
+        "male": "남성", "female": "여성", "loc_label": "태어난 지역 (도시명)",
         "concern_label": "현재 가장 큰 고민은 무엇인가요?",
-        "concern_placeholder": "예: 직장 상사와의 갈등, 이직 문제, 연애운 등"
+        "theory_header": "📚 분석 근거 및 기술적 이론 (Technical Basis)"
     },
     "en": {
         "title": "🔮 Shinryeong",
         "subtitle": "AI Metaphysical Analyst",
-        # [FIXED] English equivalent of the legal disclaimer
         "warning": """
         ⚖️ **Legal Disclaimer:**
         1. This service provides **academic analysis** based on Saju and Jami Dou Shu data; it is not absolute prophecy.
@@ -150,19 +152,14 @@ TRANS = {
         3. The user bears full responsibility for any decisions made based on this analysis.
         """,
         "submit_btn": "🔮 Request Analysis",
-        "loading": "⏳ Calculating celestial data and summoning Shinryeong...",
-        "geo_error": "⚠️ Location not found. Please try a major city name.",
-        "chat_placeholder": "Do you have follow-up questions? (Ex: Wealth luck next year?)",
+        "loading": "⏳ Calculating celestial data...",
+        "geo_error": "⚠️ Location not found. Please try a major city.",
+        "chat_placeholder": "Do you have follow-up questions?",
         "reset_btn": "🔄 Start New Analysis",
-        "dob_label": "Date of Birth",
-        "time_label": "Time of Birth",
-        "gender_label": "Gender",
-        "male": "Male", 
-        "female": "Female",
-        "loc_label": "Birth Place (City)",
-        "loc_placeholder": "Ex: Seoul, New York, London...",
+        "dob_label": "Date of Birth", "time_label": "Time of Birth", "gender_label": "Gender",
+        "male": "Male", "female": "Female", "loc_label": "Birth Place (City)",
         "concern_label": "What is your main concern?",
-        "concern_placeholder": "Ex: Career conflict, relationship advice, etc."
+        "theory_header": "📚 Technical Theory & Basis"
     }
 }
 
@@ -178,11 +175,10 @@ with st.sidebar:
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
-# Display the Warning Block
 st.info(txt["warning"])
 
 # ==========================================
-# 6. APP LOGIC
+# 5. APP LOGIC
 # ==========================================
 if not st.session_state.saju_context:
     with st.form("input"):
@@ -192,8 +188,8 @@ if not st.session_state.saju_context:
             b_time = st.time_input(txt["time_label"], value=time(12,00), step=60)
         with col2:
             gender = st.radio(txt["gender_label"], [txt["male"], txt["female"]])
-            loc_in = st.text_input(txt["loc_label"], placeholder=txt["loc_placeholder"])
-        q = st.text_area(txt["concern_label"], height=100, placeholder=txt["concern_placeholder"])
+            loc_in = st.text_input(txt["loc_label"], placeholder="Seoul, New York...")
+        q = st.text_area(txt["concern_label"], height=100)
         submitted = st.form_submit_button(txt["submit_btn"])
 
     if submitted:
@@ -208,43 +204,57 @@ if not st.session_state.saju_context:
                     saju['Birth_Place'] = loc_in
                     saju['Gender'] = gender
                     
-                    # [CRITICAL] Inject PROMPT + KNOWLEDGE + USER DATA
-                    # This structure forces the AI to "Become" Shinryeong again.
-                    ctx = f"""
-                    [SYSTEM INSTRUCTION: PERSONA ADOPTION]
+                    # [CRITICAL] 1. Enforce Language 2. Enforce Structure 3. Inject Persona
+                    system_prompt = f"""
+                    [SYSTEM ROLE]
+                    You are 'Shinryeong'. Act EXACTLY according to the Persona below.
                     {PROMPT_TEXT}
                     
                     [KNOWLEDGE BASE]
+                    Use these rules for analysis:
                     {KNOWLEDGE_TEXT}
                     
-                    [USER DATA FOR ANALYSIS]
-                    - Saju Pillars: {saju}
+                    [USER DATA]
+                    - Saju: {saju}
                     - Gender: {gender}
-                    - Birth Location: {loc_in}
-                    - Output Language: {lang_code} (Respond in this language ONLY)
+                    - Location: {loc_in}
+                    
+                    [STRICT OUTPUT RULES]
+                    1. LANGUAGE: Respond in {lang_code.upper()} ({'Korean' if lang_code == 'ko' else 'English'}). 
+                       - Even if the user asks in English, if the setting is Korean, answer in Korean.
+                    2. STRUCTURE: 
+                       - First, provide the Counseling/Advice (Persona).
+                       - Then, print EXACTLY: "[[TECHNICAL_SECTION]]"
+                       - Finally, provide the Technical Theory/Basis (Explain the Ten Gods, Elements used).
                     """
                     
-                    st.session_state.saju_context = ctx
+                    st.session_state.saju_context = system_prompt
                     
-                    # Initial Prompt
                     msgs = [
-                        {"role": "system", "content": ctx},
-                        {"role": "user", "content": f"My concern is: {q}. Please analyze my Saju and provide the solution based on the knowledge base."}
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"My concern is: {q}. Please analyze."}
                     ]
                     
-                    try:
-                        stream = generate_ai_response(msgs)
-                        response_text = st.write_stream(stream)
-                        
-                        st.session_state.messages.append({"role": "user", "content": q})
-                        st.session_state.messages.append({"role": "assistant", "content": response_text})
-                        
-                        if not st.session_state.user_info_logged:
-                            save_to_database(saju, b_date, b_time, q)
-                            st.session_state.user_info_logged = True
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"AI Error: {e}")
+                    # Call AI (No streaming to handle split)
+                    full_text = generate_ai_response(msgs)
+                    
+                    # Split Response
+                    if "[[TECHNICAL_SECTION]]" in full_text:
+                        parts = full_text.split("[[TECHNICAL_SECTION]]")
+                        main_report = parts[0]
+                        theory_report = parts[1]
+                    else:
+                        main_report = full_text
+                        theory_report = "Technical basis integrated into main text."
+
+                    # Store & Display
+                    st.session_state.messages.append({"role": "user", "content": q})
+                    st.session_state.messages.append({"role": "assistant", "content": main_report, "theory": theory_report})
+                    
+                    if not st.session_state.user_info_logged:
+                        save_to_database(saju, b_date, b_time, q)
+                        st.session_state.user_info_logged = True
+                    st.rerun()
                 else:
                     st.error(txt["geo_error"])
 else:
@@ -252,19 +262,36 @@ else:
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
+            # [FIXED] Show theory in expander if available for this message
+            if "theory" in m:
+                with st.expander(txt["theory_header"]):
+                    st.markdown(m["theory"])
             
     if p := st.chat_input(txt["chat_placeholder"]):
         st.session_state.messages.append({"role": "user", "content": p})
         with st.chat_message("user"): st.markdown(p)
         
-        groq_messages = [{"role": "system", "content": st.session_state.saju_context}]
+        # Build context for next turn
+        groq_msgs = [{"role": "system", "content": st.session_state.saju_context}]
+        # Only feed the 'content' (main text) back to AI, not the theory, to keep context clean
         for m in st.session_state.messages:
-            groq_messages.append({"role": m["role"], "content": m["content"]})
+            groq_msgs.append({"role": m["role"], "content": m["content"]})
             
         with st.chat_message("assistant"):
-            try:
-                stream = generate_ai_response(groq_messages)
-                response_text = st.write_stream(stream)
-                st.session_state.messages.append({"role": "assistant", "content": response_text})
-            except:
-                st.error("Connection failed.")
+            with st.spinner("..."):
+                response_text = generate_ai_response(groq_msgs)
+                
+                # Dynamic Split for Chat as well
+                if "[[TECHNICAL_SECTION]]" in response_text:
+                    parts = response_text.split("[[TECHNICAL_SECTION]]")
+                    main_r = parts[0]
+                    theory_r = parts[1]
+                else:
+                    main_r = response_text
+                    theory_r = "Analysis based on established Saju logic."
+                
+                st.markdown(main_r)
+                with st.expander(txt["theory_header"]):
+                    st.markdown(theory_r)
+                    
+                st.session_state.messages.append({"role": "assistant", "content": main_r, "theory": theory_r})
