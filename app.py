@@ -13,10 +13,8 @@ import os
 # ==========================================
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
 
-# Robust Geocoding
-geolocator = Nominatim(user_agent="shinryeong_app_v13_pro_master", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_app_v14_pro_logic", timeout=10)
 
-# Initialize Groq
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -24,13 +22,12 @@ except Exception as e:
     st.error(f"🚨 Connection Error: {e}")
     st.stop()
 
-# Session State
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "user_info_logged" not in st.session_state: st.session_state.user_info_logged = False
 
 # ==========================================
-# 2. FILE LOADERS (Optimized)
+# 2. FILE LOADERS
 # ==========================================
 @st.cache_data
 def load_text_file(filename):
@@ -40,7 +37,6 @@ def load_text_file(filename):
     except FileNotFoundError:
         return ""
 
-# Load Prompts
 PROMPT_TEXT = load_text_file("prompt.txt")
 KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt")
 
@@ -48,15 +44,18 @@ KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt")
 # 3. HELPER FUNCTIONS
 # ==========================================
 CITY_DB = {
-    # Major Global Cities for Instant Fallback
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
     "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
     "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
     "대구": (35.87, 128.60), "Daegu": (35.87, 128.60),
     "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
     "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
-    "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
+    "울산": (35.53, 129.31), "Ulsan": (35.53, 129.31),
+    "세종": (36.48, 127.28), "Sejong": (36.48, 127.28),
     "창원": (35.22, 128.68), "Changwon": (35.22, 128.68),
+    "수원": (37.26, 127.02), "Suwon": (37.26, 127.02),
+    "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
+    "강릉": (37.75, 128.87), "Gangneung": (37.75, 128.87),
     "New York": (40.71, -74.00), "London": (51.50, -0.12),
     "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65),
     "Los Angeles": (34.05, -118.24), "Sydney": (-33.86, 151.20)
@@ -99,18 +98,14 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_luna
     except: pass
 
 def generate_ai_response(messages):
-    """
-    Priority: Llama 3.3 (Genius) -> Mixtral (Large Memory) -> Llama 3.1 (Backup)
-    """
     models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "llama-3.1-8b-instant"]
-    
     for model in models:
         try:
             stream = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                temperature=0.6,
-                max_tokens=4500, # Allow for long, detailed reports
+                temperature=0.5, # Lowered for logic/language precision
+                max_tokens=5000,
                 top_p=1,
                 stream=True,
                 stop=None,
@@ -121,13 +116,11 @@ def generate_ai_response(messages):
                     content = chunk.choices[0].delta.content
                     full_response += content
                     yield content
-            return # Success
+            return
         except Exception as e:
-            # If rate limit or size error, try next model
             print(f"⚠️ Model {model} failed: {e}")
             continue
-            
-    yield "⚠️ System Busy: All AI models are currently overloaded. Please try again in 1 minute."
+    yield "⚠️ System Busy: Please try again in 1 minute."
 
 # ==========================================
 # 4. UI LAYOUT
@@ -138,20 +131,20 @@ TRANS = {
         "subtitle": "AI 정통 명리학 분석가",
         "warning": "⚖️ 본 분석은 명리학적 통계에 기반한 학술적 자료이며, 법률/의학적 조언이 아닙니다.",
         "submit_btn": "🔮 신령에게 정밀 분석 요청하기",
-        "loading": "⏳ 천문 데이터를 분석하고 신령을 소환하는 중...",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다. (예: 서울, 창원, 뉴욕)",
-        "chat_placeholder": "추가로 궁금한 점이 있으신가요?",
+        "loading": "⏳ 사주 명식을 세우고 신령을 소환하는 중...",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다. (예: 서울, 부산)",
+        "chat_placeholder": "결과에 대해 더 궁금한 점이 있으신가요?",
         "reset_btn": "🔄 새로운 분석",
         "dob_label": "생년월일", "time_label": "태어난 시간", "gender_label": "성별",
-        "male": "남성", "female": "여성", "loc_label": "태어난 지역 (구체적 지명 입력 가능)",
+        "male": "남성", "female": "여성", "loc_label": "태어난 지역",
         "concern_label": "가장 큰 고민은 무엇인가요?",
         "cal_label": "양력/음력 구분",
-        "theory_header": "📚 분석 근거 (Technical Basis)"
+        "theory_header": "📚 분석 근거 및 기술적 해설 (Technical Basis)"
     },
     "en": {
         "title": "🔮 Shinryeong",
         "subtitle": "AI Metaphysical Analyst",
-        "warning": "⚖️ Academic analysis based on Saju data. Not legal/medical advice.",
+        "warning": "⚖️ Academic analysis based on Saju. Not legal/medical advice.",
         "submit_btn": "🔮 Request Deep Analysis",
         "loading": "⏳ Analyzing celestial data...",
         "geo_error": "⚠️ Location not found.",
@@ -173,7 +166,7 @@ with st.sidebar:
         st.session_state.saju_context = ""
         st.session_state.user_info_logged = False
         st.rerun()
-    st.caption("Engine: Llama-3.3 (Genius)")
+    st.caption("Engine: Llama-3.3 (Logic Enhanced)")
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
@@ -191,7 +184,7 @@ if not st.session_state.saju_context:
             cal_type = st.radio(txt["cal_label"], ["양력 (Solar)", "음력 (Lunar)"])
         with col2:
             gender = st.radio(txt["gender_label"], [txt["male"], txt["female"]])
-            loc_in = st.text_input(txt["loc_label"], placeholder="Seoul, Busan, New York...")
+            loc_in = st.text_input(txt["loc_label"], placeholder="Seoul, Busan...")
         q = st.text_area(txt["concern_label"], height=100)
         submitted = st.form_submit_button(txt["submit_btn"])
 
@@ -212,63 +205,59 @@ if not st.session_state.saju_context:
                     saju['Birth_Place'] = city_name
                     saju['Gender'] = gender
                     
-                    # ----------------------------------------------------
-                    # ULTIMATE SYSTEM PROMPT (The Soul of the App)
-                    # ----------------------------------------------------
-                    # We inject the "Persona" and "Structure" forcefully.
+                    # CSV Format
+                    csv_display = f"""
+                    | Parameter | Value |
+                    | :--- | :--- |
+                    | **Date** | {b_date} ({cal_type}) |
+                    | **Time** | {b_time} |
+                    | **Location** | {city_name} |
+                    | **Gender** | {gender} |
+                    | **Saju Pillars** | Y:{saju['Year']} / M:{saju['Month']} / D:{saju['Day']} / T:{saju['Time']} |
+                    """
                     
+                    # ----------------------------------------------------
+                    # ULTIMATE SYSTEM PROMPT (Logic & Structure)
+                    # ----------------------------------------------------
                     current_year = datetime.now().year
                     
                     system_prompt = f"""
                     [SYSTEM ROLE]
-                    You are 'Shinryeong' (신령). You are a master of Saju Myeongli.
-                    Tone: Authoritative, Mystical, yet Logical (Hage-che / 하게체).
-                    Language: {lang_code.upper()} Only.
+                    You are 'Shinryeong'. You are a master Saju analyst.
+                    Tone: Authoritative, Insightful, "Hage-che" (하게체).
+                    Language: STRICTLY KOREAN (한국어). Do not use English in the final report unless it is code.
                     
-                    [KNOWLEDGE BASE OVERVIEW]
-                    {KNOWLEDGE_TEXT[:4000]} 
-                    (Note: Knowledge condensed to save memory. Use general Saju logic for details.)
+                    [KNOWLEDGE BASE]
+                    {KNOWLEDGE_TEXT[:3500]}
                     
                     [USER DATA]
                     - Saju: {saju}
                     - Gender: {gender}
                     - Location: {city_name}
-                    - Calendar: {cal_type}
                     - Concern: "{q}"
                     - Current Year: {current_year}
                     
-                    [CRITICAL INSTRUCTION: COLD READING]
-                    You MUST prove your accuracy. Look at the User's Year/Day Pillars.
-                    Find a recent year (e.g., 2022, 2023, 2024) where there was a 'Clash' (Chung) or 'Combination' (Hap) with their Day Master.
-                    Then, in Section 2, ask a SPECIFIC question like:
-                    "Did you experience a separation or job change in [Year] due to the [Clash Name] energy?"
-                    
-                    [OUTPUT FORMAT TEMPLATE]
-                    Start exactly with this Markdown table:
-                    | 구분 | 내용 |
-                    | :--- | :--- |
-                    | **생년월일** | {b_date} ({cal_type}) |
-                    | **사주(간지)** | {saju['Year']} / {saju['Month']} / {saju['Day']} / {saju['Time']} |
-                    | **분석 주제** | {q} |
-                    
-                    ---
+                    [REQUIRED OUTPUT FORMAT]
+                    1. **Start with the CSV Table provided.**
+                    2. **Use the following Sections EXACTLY:**
                     
                     ### 🔮 1. 타고난 명(命)과 기질
-                    (Analyze the 4 Pillars deeply. Use metaphors like "Lonely Pine Tree" or "Raging Ocean". Bold key terms.)
+                    (Analyze the Day Master (Il-gan) and its relation to the Month (Season). Use metaphors like 'Winter Ocean' or 'Burning Sun'. Explain the personality deeply.)
                     
-                    ### 👁️ 2. 신령의 공명 (Accuracy Check)
-                    (Perform the Cold Reading here. Ask the specific question about a past event to prove accuracy.)
+                    ### 🗡️ 2. 특별한 능력과 직업 (재능 매핑)
+                    (Analyze the 'Ten Gods' (Sipseong) structure. What is their weapon? e.g., 'Expression Star' = Art/Speech. 'Power Star' = Organization/Law. Recommend specific modern careers.)
                     
-                    ### ⚡ 3. 흐름과 리스크 (Solution)
-                    (Directly answer the user's concern "{q}". Be sharp and honest.)
+                    ### ☁️ 3. 가까운 미래의 흐름 (Near Future Prediction)
+                    (Analyze the interaction between the User's Pillars and the Current Year {current_year} and Next Year. Look for Clashes (Chung) or Combinations (Hap). Predict the trend regarding their concern.)
                     
                     ### 🛡️ 4. 신령의 처방 (Action Plan)
-                    * **행동:** ...
-                    * **마음가짐:** ...
-                    * **개운법:** ...
+                    * **행동 지침:** (Specific action)
+                    * **마음가짐:** (Mental approach)
+                    * **개운 아이템:** (Lucky color/direction)
+                    (Explain *WHY* based on the missing element in their chart. e.g., "You lack Fire, so seek bright places.")
                     
                     [[TECHNICAL_SECTION]]
-                    (Explain the technical derivation: "This analysis is based on the clash between Water and Fire in the Month Pillar...")
+                    (Detail the technical logic here: "The Day Master is Weak Water, and the Month is Earth, creating a conflict...")
                     """
                     
                     st.session_state.saju_context = system_prompt
@@ -292,12 +281,15 @@ if not st.session_state.saju_context:
                     else:
                         main_r, theory_r = full_text, "Analysis based on standard Saju logic."
 
-                    st.markdown(main_r)
+                    # Insert CSV manually at the top to guarantee it exists
+                    final_display = f"### 📜 신령의 분석 보고서\n\n{csv_display}\n\n---\n\n{main_r}"
+                    
+                    st.markdown(final_display)
                     with st.expander(txt["theory_header"]):
                         st.markdown(theory_r)
 
                     st.session_state.messages.append({"role": "user", "content": q})
-                    st.session_state.messages.append({"role": "assistant", "content": main_r, "theory": theory_r})
+                    st.session_state.messages.append({"role": "assistant", "content": final_display, "theory": theory_r})
                     
                     if not st.session_state.user_info_logged:
                         save_to_database(saju, b_date, b_time, q, is_lunar)
@@ -317,9 +309,8 @@ else:
         st.session_state.messages.append({"role": "user", "content": p})
         with st.chat_message("user"): st.markdown(p)
         
-        # Optimize context for chat
         msgs = [{"role": "system", "content": st.session_state.saju_context}]
-        for m in st.session_state.messages[-2:]: # Keep history short to avoid 429 Error
+        for m in st.session_state.messages[-2:]:
             msgs.append({"role": m["role"], "content": m["content"]})
             
         with st.chat_message("assistant"):
