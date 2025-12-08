@@ -11,7 +11,7 @@ import os
 # 1. CONFIGURATION
 # ==========================================
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
-geolocator = Nominatim(user_agent="shinryeong_pro_v19", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_app_v21_final_polish", timeout=10)
 
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
@@ -26,7 +26,7 @@ if "user_info_logged" not in st.session_state: st.session_state.user_info_logged
 if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
 
 # ==========================================
-# 2. FILE LOADERS
+# 2. LOADERS
 # ==========================================
 @st.cache_data
 def load_text_file(filename):
@@ -77,59 +77,48 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_luna
     except: pass
 
 def calculate_cold_reading(saju_data):
-    """
-    Generates a 'Psychic' statement based on Saju mechanics.
-    """
+    """Generates a specific 'Hit' fact."""
     day = saju_data['Day']
     month = saju_data['Month']
     
-    # 1. Check for "Hyun-Chim" (Needle Star) - Sharpness/Surgery
-    needles = ["갑(甲)", "신(辛)", "묘(卯)", "오(午)", "신(申)"]
-    needle_count = sum(1 for n in needles if n in day or n in month)
+    # Logic: Find Clashes or Specific Stars
+    if "충(沖)" in day or "충(沖)" in month: # Simplistic check, real logic is in engine
+        return "사주에 강한 충돌(Collision)의 기운이 있어, 최근 인간관계나 이동수로 인한 스트레스가 심하지 않았는가?"
     
-    if needle_count >= 2:
-        return "그대의 사주에는 '현침(날카로운 바늘)'의 기운이 강하네. 예민한 감각을 쓰거나 사람을 살리는 활인업(의료, 상담)을 하지 않으면, 본인의 몸에 칼을 대거나(수술수) 신경성 두통에 시달릴 수 있는 명이라네."
+    # Specific Year Logic (2024/2025)
+    day_branch = day[-2] # Extract the Branch character
+    if day_branch in ["진", "술", "축", "미"]:
+        return "2024년은 '변동'의 해였으니, 앉은 자리가 불안하거나 마음이 붕 뜨는 일이 많았을 것이네."
+    elif day_branch in ["자", "오", "묘", "유"]:
+        return "그대는 남들의 시선을 끄는 도화의 기운이 강해, 의도치 않게 구설에 오르거나 인기를 끄는 양면성을 겪었을 테지."
     
-    # 2. Check for "Yeokma" (Travel Star) - Movement
-    travels = ["인(寅)", "신(申)", "사(巳)", "해(亥)"]
-    if any(t in day or t in month for t in travels):
-        return "역마(이동수)의 기운이 강하여 한 곳에 정착하기보다는 끊임없이 움직여야 재물이 따르는 형국이네. 최근 2년 사이에 이사나 이직, 혹은 긴 여행을 다녀오지 않았는가?"
-    
-    # 3. Check for "Dohwa" (Peach Blossom) - Popularity/Scandal
-    flowers = ["자(子)", "오(午)", "묘(卯)", "유(酉)"]
-    if any(f in day or f in month for f in flowers):
-        return "도화(인기)의 기운이 서려 있어 남들의 시선을 끌어당기지만, 그만큼 구설수나 인간관계의 피로감도 함께 따르는 명이라네."
-
-    return "그대의 사주는 겉으로는 평온해 보이나 내면에는 뜨거운 용암과 같은 열정이 숨어있어, 남들이 모르는 속앓이를 자주 하는 편이군."
+    return "겉으로는 유해 보이나 속에는 남들이 모르는 칼날(예민함)을 품고 있어, 신경성 위장병이나 두통이 잦은 편이군."
 
 def generate_ai_response(messages):
     models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "llama-3.1-8b-instant"]
     for model in models:
         try:
             stream = client.chat.completions.create(
-                model=model, messages=messages, temperature=0.6, max_tokens=6000, stream=True
+                model=model, messages=messages, temperature=0.5, max_tokens=5000, stream=True
             )
-            full_response = ""
             for chunk in stream:
                 if chunk.choices[0].delta.content:
-                    c = chunk.choices[0].delta.content
-                    full_response += c
-                    yield c
+                    yield chunk.choices[0].delta.content
             return
         except: continue
-    yield "⚠️ System Busy. Please try again."
+    yield "⚠️ System Busy."
 
 # ==========================================
-# 4. UI LOGIC
+# 4. UI LAYOUT
 # ==========================================
 TRANS = {
     "ko": {
         "title": "🔮 신령 (Shinryeong)", "subtitle": "AI 정통 명리학 분석가",
         "warning": "⚖️ 본 분석은 명리학적 통계에 기반한 학술적 자료입니다.",
-        "submit_btn": "🔮 정밀 분석 시작", "loading": "⏳ 신령을 소환하고 명식을 분석 중입니다...",
+        "submit_btn": "🔮 정밀 분석 시작", "loading": "⏳ 사주 명식을 분석 중입니다...",
         "geo_error": "⚠️ 위치를 확인할 수 없습니다.", "chat_placeholder": "추가 질문을 입력하세요...",
         "reset_btn": "🔄 새로하기", "dob": "생년월일", "time": "태어난 시간",
-        "gender": "성별", "loc": "태어난 지역", "concern": "고민 내용 (비워두면 종합 운세 분석)",
+        "gender": "성별", "loc": "태어난 지역", "concern": "고민 내용",
         "cal": "양력/음력"
     },
     "en": {
@@ -154,7 +143,7 @@ st.title(t["title"])
 st.caption(t["subtitle"])
 st.info(t["warning"])
 
-# --- INPUT FORM ---
+# --- MAIN LOGIC ---
 if not st.session_state.analysis_complete:
     with st.form("input_form"):
         c1, c2 = st.columns(2)
@@ -181,89 +170,76 @@ if not st.session_state.analysis_complete:
                     saju['Birth_Place'] = matched_city if matched_city else loc
                     saju['Gender'] = gender
                     
-                    final_q = q_input if q_input.strip() else "나의 타고난 기질과 다가오는 대운의 흐름"
-                    cold_reading_text = calculate_cold_reading(saju)
+                    final_q = q_input if q_input.strip() else "나의 타고난 기질과 운세 흐름"
+                    cold_reading = calculate_cold_reading(saju)
                     
-                    # ----------------------------------------------------
-                    # ULTIMATE SYSTEM PROMPT (Logic Injection)
-                    # ----------------------------------------------------
+                    # 1. TABLE GENERATION (Clean & Spaced)
+                    table_md = f"""
+| 구분 | 내용 |
+| :--- | :--- |
+| **생년월일** | {b_date} ({cal}) |
+| **시간** | {b_time} |
+| **지역** | {saju['Birth_Place']} |
+| **성별** | {gender} |
+| **사주** | {saju['Year']} / {saju['Month']} / {saju['Day']} / {saju['Time']} |
+| **주제** | {final_q} |
+"""
+                    
+                    # 2. PROMPT
+                    current_year = datetime.now().year
                     sys_p = f"""
                     [SYSTEM ROLE]
-                    You are 'Shinryeong' (신령). You are an ancient Saju master.
-                    Tone: "Hage-che" (하게체: ~하네, ~이라네, ~보이네). Authoritative but benevolent.
-                    Language: STRICTLY KOREAN. Use English only for specific terms in brackets like (Fire).
+                    You are 'Shinryeong' (신령). Speak strictly in "Hage-che" (하게체).
+                    Language: {lang.upper()} Only. DO NOT use Chinese characters like '的' or '变化'. Use Korean.
                     
-                    [KNOWLEDGE BASE]
-                    {KNOWLEDGE_TEXT[:3000]}
-                    
-                    [LOGIC CHEAT SHEET - USE THIS]
-                    1. **Metaphor:** Combine Day Stem (Person) + Month Branch (Season).
-                       - Ex: Gam (Wood) in Ja (Winter) -> "Tree floating in cold water."
-                       - Ex: Byung (Fire) in O (Summer) -> "Blazing Sun in the desert."
-                    2. **Career (Ten Gods):**
-                       - Sik-Shin (Expression): Artist, CEO, Chef.
-                       - Gwan-Sal (Control): Judge, Police, Corporate Exec.
-                       - In-Seong (Resource): Professor, Writer, License-holder.
-                    3. **Health/Items:**
-                       - Missing Fire? Recommend Red/South/Bitter taste.
-                       - Missing Water? Recommend Black/North/Salty taste.
+                    [KNOWLEDGE]
+                    {KNOWLEDGE_TEXT[:3500]}
                     
                     [USER DATA]
-                    - Day Master: {saju['Day']} (Identity)
-                    - Month: {saju['Month']} (Environment)
-                    - Cold Reading Fact: "{cold_reading_text}"
+                    - Day Master: {saju['Day']}
+                    - Month: {saju['Month']}
                     - Concern: "{final_q}"
+                    - Cold Reading Fact: "{cold_reading}"
                     
-                    [REQUIRED OUTPUT FORMAT]
-                    1. Do NOT output the table.
-                    2. Use the exact headers below.
+                    [OUTPUT FORMAT]
+                    Start directly with Section 1. Do NOT repeat the table.
                     
-                    ### 🔮 1. 타고난 명(命)과 기질 (Visual Analysis)
-                    (Create a vivid nature metaphor based on Day+Month. Explain the conflict or harmony.)
+                    ### 🔮 1. 타고난 명(命)과 기질
+                    (Analyze deeply. Use nature metaphors like 'Winter Ocean'. Bold key terms.)
                     
-                    ### 🗡️ 2. 특별한 능력과 직업 (Talent Mapping)
-                    (Analyze the dominant Ten Gods. Suggest 3 specific modern job titles. Explain why.)
+                    ### 🗡️ 2. 특별한 능력과 직업 (재능 매핑)
+                    (Analyze Ten Gods. Recommend specific careers.)
                     
                     ### 👁️ 3. 신령의 공명 (Accuracy Check)
-                    (Output this text EXACTLY: "{cold_reading_text}")
+                    (State this EXACTLY: "{cold_reading}")
                     
-                    ### ☁️ 4. 가까운 미래의 흐름 (Prediction)
-                    (Predict the energy of 2025/2026. Focus on the user's concern.)
+                    ### ☁️ 4. 가까운 미래의 흐름
+                    (Predict {current_year} and {current_year+1}.)
                     
                     ### ⚡ 5. 당신의 고민에 대한 해답
-                    (Direct answer to: "{final_q}")
+                    (Directly answer: "{final_q}")
                     
-                    ### 🛡️ 6. 신령의 처방 (Action Plan)
-                    * **행동:** (Specific habit)
-                    * **마음가짐:** (Mental advice)
-                    * **개운 아이템:** (Color, Direction, Object)
+                    ### 🛡️ 6. 신령의 처방
+                    * **행동:** ...
+                    * **마음가짐:** ...
+                    * **개운 아이템:** ...
                     
                     [[TECHNICAL_SECTION]]
-                    (Explain technical terms like 'Day Master', 'Ten Gods' used.)
+                    (Technical logic.)
                     """
                     
                     st.session_state.saju_context = sys_p
                     st.session_state.analysis_complete = True
                     
-                    msgs = [{"role": "system", "content": sys_p}, {"role": "user", "content": "Analyze deeply."}]
-                    st.session_state.messages.append({"role": "user", "content": f"분석 요청: {final_q}"})
+                    msgs = [{"role": "system", "content": sys_p}, {"role": "user", "content": "Analyze."}]
                     
-                    # Python Table Render
-                    table_md = f"""
-                    ### 📜 신령의 분석 보고서
-                    | 구분 | 내용 |
-                    | :--- | :--- |
-                    | **생년월일** | {b_date} ({cal}) |
-                    | **시간** | {b_time} |
-                    | **지역** | {saju['Birth_Place']} |
-                    | **성별** | {gender} |
-                    | **사주** | {saju['Year']} (년) / {saju['Month']} (월) / {saju['Day']} (일) / {saju['Time']} (시) |
-                    | **주제** | {final_q} |
-                    ---
-                    """
-                    
+                    # 3. DISPLAY
                     with st.chat_message("assistant"):
+                        st.markdown("### 📜 신령의 분석 보고서")
                         st.markdown(table_md)
+                        st.markdown("---") # Visual Separator
+                        st.markdown("")    # Empty line for spacing
+                        
                         full_resp = ""
                         resp_container = st.empty()
                         for chunk in generate_ai_response(msgs):
@@ -279,7 +255,9 @@ if not st.session_state.analysis_complete:
                         with st.expander("📚 분석 근거 (Technical Basis)"):
                             st.markdown(tech_r)
                             
-                        st.session_state.messages.append({"role": "assistant", "content": table_md + main_r, "theory": tech_r})
+                        # Save full formatted content to history
+                        final_content = f"### 📜 신령의 분석 보고서\n\n{table_md}\n\n---\n\n{main_r}"
+                        st.session_state.messages.append({"role": "assistant", "content": final_content, "theory": tech_r})
                     
                     if not st.session_state.user_info_logged:
                         save_to_database(saju, b_date, b_time, final_q, is_lunar)
@@ -293,7 +271,7 @@ else:
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
-            if "theory" in m:
+            if "theory" in m and m["theory"]:
                 with st.expander("📚 분석 근거"):
                     st.markdown(m["theory"])
     
@@ -316,7 +294,7 @@ else:
                 main_r, tech_r = full_resp.split("[[TECHNICAL_SECTION]]")
             else:
                 main_r, tech_r = full_resp, ""
-                
+            
             resp_container.markdown(main_r)
             if tech_r:
                 with st.expander("📚 분석 근거"):
