@@ -1,9 +1,9 @@
 import ephem
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 # ==========================================
-# 1. CONSTANTS & MAPPINGS
+# 1. CONSTANTS
 # ==========================================
 CHEONGAN = ["갑", "을", "병", "정", "무", "기", "경", "신", "임", "계"]
 JIJI = ["자", "축", "인", "묘", "진", "사", "오", "미", "신", "유", "술", "해"]
@@ -38,22 +38,15 @@ def calculate_shinsal(full_str):
     if any(c in full_str for c in "자오묘유"): shinsal.append("도화살(인기/매력)")
     if any(c in full_str for c in "진술축미"): shinsal.append("화개살(예술/고독)")
     if any(c in full_str for c in "갑신묘오"): shinsal.append("현침살(예민/기술)")
-    if ("진" in full_str and "해" in full_str) or ("사" in full_str and "술" in full_str):
-        shinsal.append("원진살(애증/갈등)")
+    # 김용준 사주(오-오 자형)
+    if full_str.count("오") >= 2: shinsal.append("자형살(스스로 볶는 스트레스)")
     return shinsal
 
-def gregorian_to_jd(year, month, day):
-    """Astronomical Julian Day Calculation"""
-    if month <= 2:
-        year -= 1
-        month += 12
-    A = math.floor(year / 100)
-    B = 2 - A + math.floor(A / 4)
-    JD = math.floor(365.25 * (year + 4716)) + math.floor(30.6001 * (month + 1)) + day + B - 1524.5
-    return JD
-
 def calculate_saju_v3(year, month, day, hour, minute, lat, lon):
-    # 1. Observer
+    """
+    [v6.0 Engine] Uses Python's reliable date ordinal for Day Pillar.
+    """
+    # 1. Observer Setup (For Solar Terms/Month)
     observer = ephem.Observer()
     observer.lat = str(lat)
     observer.lon = str(lon)
@@ -66,24 +59,27 @@ def calculate_saju_v3(year, month, day, hour, minute, lat, lon):
     sun_lon_deg = math.degrees(ephem.Ecliptic(sun).lon)
     if sun_lon_deg < 0: sun_lon_deg += 360
 
-    # 3. Pillars
-    # Year
+    # 3. YEAR PILLAR
     saju_year = year - 1 if (month <= 2 and 270 <= sun_lon_deg < 315) else year
-    year_stem, year_branch = get_ganji_tuple((saju_year - 1924) % 60)
-    
-    # Month
+    year_ganji_idx = (saju_year - 1924) % 60
+    year_stem, year_branch = get_ganji_tuple(year_ganji_idx)
+
+    # 4. MONTH PILLAR
     term_deg = (sun_lon_deg - 315) if sun_lon_deg >= 315 else (sun_lon_deg + 45)
     month_idx = int(term_deg // 30) % 12
     y_stem_idx = CHEONGAN.index(year_stem)
     m_stem_idx = ((y_stem_idx % 5) * 2 + 2 + month_idx) % 10
     month_stem, month_branch = CHEONGAN[m_stem_idx], JIJI[(2 + month_idx) % 12]
 
-    # Day (JD Method)
-    jd = gregorian_to_jd(year, month, day)
-    day_offset = int(jd - 2415021 + 0.5) 
-    day_stem, day_branch = get_ganji_tuple((10 + day_offset) % 60)
+    # 5. DAY PILLAR (The Anchor Method)
+    # 1924-01-01 was Gap-Ja (Index 0)
+    base_date = date(1924, 1, 1)
+    target_date = date(year, month, day)
+    delta_days = (target_date - base_date).days
+    day_ganji_idx = delta_days % 60
+    day_stem, day_branch = get_ganji_tuple(day_ganji_idx)
 
-    # Time
+    # 6. TIME PILLAR
     time_idx = ((hour + 1) // 2) % 12
     d_stem_idx = CHEONGAN.index(day_stem)
     t_stem_idx = ((d_stem_idx % 5) * 2 + time_idx) % 10
