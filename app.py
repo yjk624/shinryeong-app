@@ -12,11 +12,8 @@ import os
 # 1. CONFIGURATION
 # ==========================================
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
+geolocator = Nominatim(user_agent="shinryeong_app_v20_final", timeout=10)
 
-# Robust Geocoding
-geolocator = Nominatim(user_agent="shinryeong_app_v18_optimized", timeout=10)
-
-# Initialize Groq
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -28,43 +25,32 @@ except Exception as e:
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "user_info_logged" not in st.session_state: st.session_state.user_info_logged = False
+if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
 
 # ==========================================
-# 2. FILE LOADERS
+# 2. LOADERS & HELPERS
 # ==========================================
 @st.cache_data
 def load_text_file(filename):
     try:
-        with open(filename, "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return ""
+        with open(filename, "r", encoding="utf-8") as f: return f.read()
+    except: return ""
 
 PROMPT_TEXT = load_text_file("prompt.txt")
 KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt")
 
-# ==========================================
-# 3. HELPER FUNCTIONS
-# ==========================================
 CITY_DB = {
-    "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
-    "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
-    "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
-    "대구": (35.87, 128.60), "Daegu": (35.87, 128.60),
-    "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
-    "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
-    "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
-    "창원": (35.22, 128.68), "Changwon": (35.22, 128.68),
-    "New York": (40.71, -74.00), "London": (51.50, -0.12),
-    "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65)
+    "서울": (37.56, 126.97), "부산": (35.17, 129.07), "인천": (37.45, 126.70), 
+    "대구": (35.87, 128.60), "대전": (36.35, 127.38), "광주": (35.15, 126.85), 
+    "울산": (35.53, 129.31), "세종": (36.48, 127.28), "창원": (35.22, 128.68),
+    "제주": (33.49, 126.53), "New York": (40.71, -74.00), "Tokyo": (35.67, 139.65)
 }
 
 def get_coordinates(city_input):
     clean = city_input.strip()
     if clean in CITY_DB: return CITY_DB[clean], clean
-    for city_key, coords in CITY_DB.items():
-        if city_key in clean or city_key.lower() in clean.lower():
-            return coords, city_key 
+    for k, v in CITY_DB.items():
+        if k in clean or k.lower() in clean.lower(): return v, k
     try:
         loc = geolocator.geocode(clean)
         if loc: return (loc.latitude, loc.longitude), clean
@@ -74,286 +60,236 @@ def get_coordinates(city_input):
 def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_lunar):
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        gs_client = gspread.authorize(creds)
-        sheet = gs_client.open("Shinryeong_User_Data").sheet1
-        cal_type = "Lunar" if is_lunar else "Solar"
-        row = [
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(dict(st.secrets["gcp_service_account"]), scope)
+        client = gspread.authorize(creds)
+        sheet = client.open("Shinryeong_User_Data").sheet1
+        sheet.append_row([
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            f"{birth_date_obj.strftime('%Y-%m-%d')} ({cal_type})",
-            birth_time_obj.strftime("%H:%M"),
+            f"{birth_date_obj} ({'Lunar' if is_lunar else 'Solar'})",
+            str(birth_time_obj),
             str(user_data.get('Birth_Place', 'Unknown')),
             user_data.get('Gender', 'Unknown'),
             user_data.get('Year', ''), user_data.get('Month', ''), 
             user_data.get('Day', ''), user_data.get('Time', ''),
             concern
-        ]
-        sheet.append_row(row)
+        ])
     except: pass
 
-def generate_ai_response(messages, model_choice):
-    """
-    Smart Generator with Fallback Logic.
-    """
-    # 1. User Selected Model
-    primary_model = model_choice 
-    
-    # 2. Fallback Models (If primary fails)
-    backups = ["llama-3.1-8b-instant", "mixtral-8x7b-32768"]
-    
-    # Create priority queue (Primary + Backups, removing duplicates)
-    queue = [primary_model] + [m for m in backups if m != primary_model]
-    
-    for model in queue:
+def generate_ai_response(messages):
+    # Try high-quality model first
+    models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "llama-3.1-8b-instant"]
+    for model in models:
         try:
             stream = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.5,
-                max_tokens=4000,
-                top_p=1,
-                stream=True,
-                stop=None,
+                model=model, messages=messages, temperature=0.5, max_tokens=5000, stream=True
             )
-            full_response = ""
+            full_resp = ""
             for chunk in stream:
                 if chunk.choices[0].delta.content:
                     c = chunk.choices[0].delta.content
-                    full_response += c
+                    full_resp += c
                     yield c
-            return # Stop if successful
-            
-        except Exception as e:
-            # If 429 (Rate Limit), try next. If others, print warning.
-            error_str = str(e)
-            if "429" in error_str or "rate limit" in error_str.lower():
-                # Silently failover
-                continue 
-            else:
-                yield f"⚠️ Error with {model}: {e}"
-                return
-    
-    yield "⚠️ System Busy: Daily quota exceeded for all models. Please try again tomorrow."
+            return
+        except: continue
+    yield "⚠️ System Busy. Please try again."
 
 # ==========================================
-# 4. UI LAYOUT
+# 3. UI LAYOUT
 # ==========================================
 TRANS = {
     "ko": {
-        "title": "🔮 신령 (Shinryeong)",
-        "subtitle": "AI 정통 명리학 분석가",
+        "title": "🔮 신령 (Shinryeong)", "subtitle": "AI 정통 명리학 분석가",
         "warning": "⚖️ 본 분석은 명리학적 통계에 기반한 학술적 자료입니다.",
-        "submit_btn": "🔮 정밀 분석 시작",
-        "loading": "⏳ 신령을 소환하고 사주를 분석하는 중...",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다. (예: 서울, 부산)",
-        "chat_placeholder": "결과에 대해 더 궁금한 점이 있으신가요?",
-        "reset_btn": "🔄 새로운 분석",
-        "dob_label": "생년월일", "time_label": "태어난 시간", "gender_label": "성별",
-        "male": "남성", "female": "여성", "loc_label": "태어난 지역",
-        "concern_label": "가장 큰 고민은 무엇인가요?",
-        "cal_label": "양력/음력 구분",
-        "theory_header": "📚 분석 근거 (Technical Basis)"
+        "submit_btn": "🔮 정밀 분석 시작", "loading": "⏳ 사주 명식을 분석 중입니다...",
+        "geo_error": "⚠️ 위치를 확인할 수 없습니다.", "chat_placeholder": "추가 질문을 입력하세요...",
+        "reset_btn": "🔄 새로하기", "dob": "생년월일", "time": "태어난 시간",
+        "gender": "성별", "loc": "태어난 지역", "concern": "고민 내용 (비워두면 종합 운세 분석)",
+        "cal": "양력/음력"
     },
     "en": {
-        "title": "🔮 Shinryeong",
-        "subtitle": "AI Metaphysical Analyst",
+        "title": "🔮 Shinryeong", "subtitle": "AI Metaphysical Analyst",
         "warning": "⚖️ Academic analysis based on Saju.",
-        "submit_btn": "🔮 Analyze",
-        "loading": "⏳ Analyzing...",
-        "geo_error": "⚠️ Location not found.",
-        "chat_placeholder": "Follow-up question...",
-        "reset_btn": "🔄 New Analysis",
-        "dob_label": "Date of Birth", "time_label": "Time of Birth", "gender_label": "Gender",
-        "male": "Male", "female": "Female", "loc_label": "Birth Place",
-        "concern_label": "Main Concern",
-        "cal_label": "Calendar",
-        "theory_header": "📚 Technical Basis"
+        "submit_btn": "🔮 Analyze", "loading": "⏳ Analyzing...",
+        "geo_error": "⚠️ Location not found.", "chat_placeholder": "Follow-up question...",
+        "reset_btn": "🔄 Reset", "dob": "Date of Birth", "time": "Time",
+        "gender": "Gender", "loc": "Birth Place", "concern": "Concern (Leave empty for general)",
+        "cal": "Calendar"
     }
 }
 
 with st.sidebar:
-    lang_code = "ko" if st.radio("Language / 언어", ["한국어", "English"]) == "한국어" else "en"
-    txt = TRANS[lang_code]
-    if st.button(txt["reset_btn"]):
-        st.session_state.messages = []
-        st.session_state.saju_context = ""
-        st.session_state.user_info_logged = False
+    lang = "ko" if st.radio("Language", ["한국어", "English"]) == "한국어" else "en"
+    t = TRANS[lang]
+    if st.button(t["reset_btn"]):
+        st.session_state.clear()
         st.rerun()
-        
-    st.markdown("---")
-    st.markdown("**⚙️ AI Engine Select**")
-    # DEFAULT IS NOW 8B TO FIX YOUR ERROR
-    model_choice = st.selectbox(
-        "Model Priority",
-        ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
-        index=0, # Default to 8B (Speed/Unlimited)
-        help="Use 70B for max intelligence. Use 8B for speed and avoiding limits."
-    )
 
-st.title(txt["title"])
-st.caption(txt["subtitle"])
-st.info(txt["warning"])
+st.title(t["title"])
+st.caption(t["subtitle"])
+st.info(t["warning"])
 
-# ==========================================
-# 5. MAIN LOGIC
-# ==========================================
-if not st.session_state.saju_context:
-    with st.form("input"):
-        col1, col2 = st.columns(2)
-        with col1:
-            b_date = st.date_input(txt["dob_label"], min_value=datetime(1940,1,1))
-            b_time = st.time_input(txt["time_label"], value=time(12,00), step=60)
-            cal_type = st.radio(txt["cal_label"], ["양력 (Solar)", "음력 (Lunar)"])
-        with col2:
-            gender = st.radio(txt["gender_label"], [txt["male"], txt["female"]])
-            loc_in = st.text_input(txt["loc_label"], placeholder="Seoul, Busan...")
-        q = st.text_area(txt["concern_label"], height=100)
-        submitted = st.form_submit_button(txt["submit_btn"])
+# --- INPUT FORM ---
+if not st.session_state.analysis_complete:
+    with st.form("input_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            b_date = st.date_input(t["dob"], min_value=datetime(1940,1,1))
+            b_time = st.time_input(t["time"], value=time(12,0), step=60)
+            cal = st.radio(t["cal"], ["양력 (Solar)", "음력 (Lunar)"])
+        with c2:
+            gender = st.radio(t["gender"], ["남성 (Male)", "여성 (Female)"])
+            loc = st.text_input(t["loc"], placeholder="Seoul, Busan...")
+        q_input = st.text_area(t["concern"], height=100)
+        submitted = st.form_submit_button(t["submit_btn"])
 
     if submitted:
-        if not loc_in:
-            st.error(txt["geo_error"])
+        if not loc:
+            st.error(t["geo_error"])
         else:
-            with st.spinner(txt["loading"]):
-                coords, matched_city = get_coordinates(loc_in)
-                
+            with st.spinner(t["loading"]):
+                coords, matched_city = get_coordinates(loc)
                 if coords:
-                    lat, lon = coords
-                    is_lunar = True if "음력" in cal_type else False
-                    city_name = matched_city if matched_city else loc_in
-                    
+                    is_lunar = "음력" in cal
                     saju = calculate_saju_v3(b_date.year, b_date.month, b_date.day, 
-                                           b_time.hour, b_time.minute, lat, lon, is_lunar)
-                    saju['Birth_Place'] = city_name
+                                           b_time.hour, b_time.minute, coords[0], coords[1], is_lunar)
+                    saju['Birth_Place'] = matched_city if matched_city else loc
                     saju['Gender'] = gender
                     
-                    # CSV Format
-                    csv_display = f"""
-                    | Parameter | Value |
-                    | :--- | :--- |
-                    | **Date** | {b_date} ({cal_type}) |
-                    | **Time** | {b_time} |
-                    | **Location** | {city_name} |
-                    | **Gender** | {gender} |
-                    | **Saju Pillars** | Y:{saju['Year']} / M:{saju['Month']} / D:{saju['Day']} / T:{saju['Time']} |
-                    """
+                    # 1. Default Question Handling
+                    final_q = q_input if q_input.strip() else "나의 전반적인 사주 기질과 다가오는 미래의 운세 흐름"
                     
-                    # Token Optimization: Truncate Knowledge for initial request if using 8B
-                    # If model is 8B, use lighter context. If 70B, use full.
-                    kb_limit = 2000 if "8b" in model_choice else 3500
-                    
-                    current_year = datetime.now().year
-                    system_prompt = f"""
+                    # 2. System Prompt
+                    sys_p = f"""
                     [SYSTEM ROLE]
-                    You are 'Shinryeong'. Master Saju Analyst. 
-                    Tone: Hage-che (하게체). Language: {lang_code.upper()} Only.
+                    You are 'Shinryeong' (신령). Speak in 'Hage-che' (하게체: ~하네, ~이라네).
+                    Language: {lang.upper()} Only. No English in output text.
                     
                     [KNOWLEDGE]
-                    {KNOWLEDGE_TEXT[:kb_limit]}
+                    {KNOWLEDGE_TEXT[:3500]}
                     
                     [USER DATA]
-                    - Day Master (User): {saju['Day']}
-                    - Month (Env): {saju['Month']}
-                    - Concern: "{q}"
-                    - Year: {current_year}
+                    - Day Master: {saju['Day']} (Identity)
+                    - Month: {saju['Month']} (Environment)
+                    - Concern: "{final_q}"
                     
-                    [FORMAT]
-                    1. **Start with the CSV Table provided.**
-                    2. **Sections:**
+                    [FORMATTING RULES]
+                    1. Use Markdown Headers (###).
+                    2. Explain "Ten Gods" as "십성(十神)".
+                    3. Explain Hanja meanings (e.g., "갑(甲)은 큰 나무를 뜻하며...").
                     
+                    [SECTIONS]
                     ### 🔮 1. 타고난 명(命)과 기질
-                    (Metaphorical analysis of Day Master vs Month.)
+                    (Analyze the 4 Pillars. Explain the Hanja characters. Use nature metaphors.)
                     
-                    ### 🗡️ 2. 특별한 능력과 직업
-                    (Ten Gods analysis. Specific jobs.)
+                    ### 🗡️ 2. 특별한 능력과 직업 (재능 매핑)
+                    (Analyze Sipseong/Ten Gods. Suggest careers.)
                     
-                    ### 👁️ 3. 신령의 공명 (Cold Reading)
-                    (Find a clash in {current_year-1} or {current_year}. Ask a confirming question about a past event.)
+                    ### 👁️ 3. 신령의 공명 (Accuracy Check)
+                    (Ask about a past event or personality trait to verify accuracy.)
                     
                     ### ☁️ 4. 가까운 미래의 흐름
-                    (Predict {current_year} and {current_year+1}.)
+                    (Predict 2025/2026 flow.)
                     
-                    ### ⚡ 5. 고민 해결 (Direct Answer)
-                    (Answer "{q}")
+                    ### ⚡ 5. 당신의 고민에 대한 신령의 해답
+                    (Directly answer: "{final_q}")
                     
                     ### 🛡️ 6. 신령의 처방
-                    * **행동/마음가짐/개운템**
+                    (Actionable advice.)
                     
                     [[TECHNICAL_SECTION]]
-                    (Technical logic.)
+                    (Technical footnotes.)
                     """
                     
-                    st.session_state.saju_context = system_prompt
+                    st.session_state.saju_context = sys_p
+                    st.session_state.analysis_complete = True
                     
-                    msgs = [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Analyze my Saju ({saju['Day']}). Concern: {q}"}
-                    ]
+                    # 3. Python-Generated Table (Perfectly Centered)
+                    table_md = f"""
+                    | 구분 | 내용 |
+                    | :--- | :--- |
+                    | **생년월일** | {b_date} ({cal}) |
+                    | **시간** | {b_time} |
+                    | **지역** | {saju['Birth_Place']} |
+                    | **성별** | {gender} |
+                    | **사주** | {saju['Year']} / {saju['Month']} / {saju['Day']} / {saju['Time']} |
+                    | **질문** | {final_q} |
+                    """
                     
-                    response_container = st.empty()
-                    full_text = ""
+                    msgs = [{"role": "system", "content": sys_p}, {"role": "user", "content": "Analyze."}]
                     
-                    for chunk in generate_ai_response(msgs, model_choice):
-                        full_text += chunk
-                        response_container.markdown(full_text + "▌")
-                    
-                    response_container.empty()
-                    if "[[TECHNICAL_SECTION]]" in full_text:
-                        parts = full_text.split("[[TECHNICAL_SECTION]]")
-                        main_r, theory_r = parts[0], parts[1]
-                    else:
-                        main_r, theory_r = full_text, "Analysis based on standard Saju logic."
-
-                    final_display = f"### 📜 신령의 분석 보고서\n\n{csv_display}\n\n---\n\n{main_r}"
-                    
-                    st.markdown(final_display)
-                    with st.expander(txt["theory_header"]):
-                        st.markdown(theory_r)
-
-                    st.session_state.messages.append({"role": "user", "content": q})
-                    st.session_state.messages.append({"role": "assistant", "content": final_display, "theory": theory_r})
+                    # 4. Stream & Display
+                    with st.chat_message("assistant"):
+                        st.markdown("### 📜 신령의 분석 보고서")
+                        st.markdown(table_md)
+                        st.markdown("---")
+                        
+                        full_resp = ""
+                        resp_container = st.empty()
+                        for chunk in generate_ai_response(msgs):
+                            full_resp += chunk
+                            resp_container.markdown(full_resp + "▌")
+                        
+                        if "[[TECHNICAL_SECTION]]" in full_resp:
+                            main_r, tech_r = full_resp.split("[[TECHNICAL_SECTION]]")
+                        else:
+                            main_r, tech_r = full_resp, ""
+                            
+                        resp_container.markdown(main_r)
+                        with st.expander("📚 분석 근거 (Technical Basis)"):
+                            st.markdown(tech_r)
+                            
+                        st.session_state.messages.append({"role": "assistant", "content": main_r, "theory": tech_r, "table": table_md})
                     
                     if not st.session_state.user_info_logged:
-                        save_to_database(saju, b_date, b_time, q, is_lunar)
+                        save_to_database(saju, b_date, b_time, final_q, is_lunar)
                         st.session_state.user_info_logged = True
+                        
+                    # Rerun to unlock chat input immediately
+                    st.rerun() 
                 else:
-                    st.error(txt["geo_error"])
+                    st.error(t["geo_error"])
+
+# --- CHAT MODE ---
 else:
-    st.markdown("---")
-    for m in st.session_state.messages:
+    # Render History (Including the Table for the first msg)
+    for i, m in enumerate(st.session_state.messages):
         with st.chat_message(m["role"]):
-            st.markdown(m["content"])
-            if "theory" in m:
-                with st.expander(txt["theory_header"]):
-                    st.markdown(m["theory"])
+            # If this is the very first AI response, show the table again
+            if m["role"] == "assistant" and "table" in m:
+                st.markdown("### 📜 신령의 분석 보고서")
+                st.markdown(m["table"])
+                st.markdown("---")
             
-    if p := st.chat_input(txt["chat_placeholder"]):
+            st.markdown(m["content"])
+            if "theory" in m and m["theory"]:
+                with st.expander("📚 분석 근거"):
+                    st.markdown(m["theory"])
+    
+    # Input Area
+    if p := st.chat_input(t["chat_placeholder"]):
         st.session_state.messages.append({"role": "user", "content": p})
         with st.chat_message("user"): st.markdown(p)
         
-        # Optimized Context for Chat (Last 2 msgs only)
         msgs = [{"role": "system", "content": st.session_state.saju_context}]
-        for m in st.session_state.messages[-2:]:
+        # Limit history context
+        for m in st.session_state.messages[-4:]:
             msgs.append({"role": m["role"], "content": m["content"]})
             
         with st.chat_message("assistant"):
-            response_container = st.empty()
-            full_text = ""
-            for chunk in generate_ai_response(msgs, model_choice):
-                full_text += chunk
-                response_container.markdown(full_text + "▌")
+            full_resp = ""
+            resp_container = st.empty()
+            for chunk in generate_ai_response(msgs):
+                full_resp += chunk
+                resp_container.markdown(full_resp + "▌")
             
-            response_container.empty()
-            if "[[TECHNICAL_SECTION]]" in full_text:
-                main_r, tech_r = full_text.split("[[TECHNICAL_SECTION]]")
+            if "[[TECHNICAL_SECTION]]" in full_resp:
+                main_r, tech_r = full_resp.split("[[TECHNICAL_SECTION]]")
             else:
-                main_r, tech_r = full_text, ""
-                
-            st.markdown(main_r)
+                main_r, tech_r = full_resp, ""
+            
+            resp_container.markdown(main_r)
             if tech_r:
-                with st.expander(txt["theory_header"]):
+                with st.expander("📚 분석 근거"):
                     st.markdown(tech_r)
             
             st.session_state.messages.append({"role": "assistant", "content": main_r, "theory": tech_r})
