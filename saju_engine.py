@@ -3,7 +3,7 @@ import math
 from datetime import datetime, timedelta
 
 # ==========================================
-# 1. CONSTANTS & MAPPINGS
+# 1. CONSTANTS
 # ==========================================
 CHEONGAN = ["갑", "을", "병", "정", "무", "기", "경", "신", "임", "계"]
 JIJI = ["자", "축", "인", "묘", "진", "사", "오", "미", "신", "유", "술", "해"]
@@ -12,21 +12,16 @@ def get_ganji_tuple(index):
     return (CHEONGAN[index % 10], JIJI[index % 12])
 
 def calculate_ten_gods(day_stem, target_stem):
-    """일간(Day)과 타 천간(Target)의 십성 관계 계산"""
     stems_info = {
         '갑': (0, 0), '을': (0, 1), '병': (1, 0), '정': (1, 1),
         '무': (2, 0), '기': (2, 1), '경': (3, 0), '신': (3, 1),
         '임': (4, 0), '계': (4, 1)
     }
-    # (오행: 목0 화1 토2 금3 수4, 음양: 0양 1음)
     if day_stem not in stems_info or target_stem not in stems_info: return ""
-    
     me, me_yin = stems_info[day_stem]
     tgt, tgt_yin = stems_info[target_stem]
-    
     diff = (tgt - me) % 5
     same_yin = (me_yin == tgt_yin)
-    
     patterns = {
         0: ("비견", "겁재"), 1: ("식신", "상관"), 2: ("편재", "정재"),
         3: ("편관", "정관"), 4: ("편인", "정인")
@@ -39,7 +34,19 @@ def calculate_shinsal(full_str):
     if any(c in full_str for c in "자오묘유"): shinsal.append("도화살(인기/매력)")
     if any(c in full_str for c in "진술축미"): shinsal.append("화개살(예술/고독)")
     if any(c in full_str for c in "갑신묘오"): shinsal.append("현침살(예민/기술)")
+    if ("진" in full_str and "해" in full_str) or ("사" in full_str and "술" in full_str):
+        shinsal.append("원진살(애증/갈등)")
     return shinsal
+
+def gregorian_to_jd(year, month, day):
+    """Astronomical Julian Day Calculation for perfect Ganji accuracy."""
+    if month <= 2:
+        year -= 1
+        month += 12
+    A = math.floor(year / 100)
+    B = 2 - A + math.floor(A / 4)
+    JD = math.floor(365.25 * (year + 4716)) + math.floor(30.6001 * (month + 1)) + day + B - 1524.5
+    return JD
 
 def calculate_saju_v3(year, month, day, hour, minute, lat, lon):
     # 1. Observer Setup
@@ -47,52 +54,53 @@ def calculate_saju_v3(year, month, day, hour, minute, lat, lon):
     observer.lat = str(lat)
     observer.lon = str(lon)
     birth_date_kst = datetime(year, month, day, hour, minute)
-    observer.date = birth_date_kst - timedelta(hours=9) # UTC conversion
+    observer.date = birth_date_kst - timedelta(hours=9)
 
-    # 2. Solar Longitude
+    # 2. Solar Longitude (Season)
     sun = ephem.Sun(observer)
     sun.compute(observer)
     sun_lon_deg = math.degrees(ephem.Ecliptic(sun).lon)
     if sun_lon_deg < 0: sun_lon_deg += 360
 
-    # 3. Pillars Calculation
-    # Year
+    # 3. YEAR PILLAR
+    # 입춘(315도) 기준
     saju_year = year - 1 if (month <= 2 and 270 <= sun_lon_deg < 315) else year
-    year_stem, year_branch = get_ganji_tuple((saju_year - 1924) % 60)
-    
-    # Month (Solar Term)
+    # 1924 = 갑자(0). (Year - 1924) % 60
+    year_ganji_idx = (saju_year - 1924) % 60
+    year_stem, year_branch = get_ganji_tuple(year_ganji_idx)
+
+    # 4. MONTH PILLAR
+    # 12절기 기준 월 할당
     term_deg = (sun_lon_deg - 315) if sun_lon_deg >= 315 else (sun_lon_deg + 45)
     month_idx = int(term_deg // 30) % 12
+    # 년간두법 (Year Stem -> Month Stem)
     y_stem_idx = CHEONGAN.index(year_stem)
     m_stem_idx = ((y_stem_idx % 5) * 2 + 2 + month_idx) % 10
     month_stem, month_branch = CHEONGAN[m_stem_idx], JIJI[(2 + month_idx) % 12]
 
-    # Day (Julian)
-    base_date = datetime(2000, 1, 1)
-    day_idx = (54 + (birth_date_kst.date() - base_date.date()).days) % 60
-    day_stem, day_branch = get_ganji_tuple(day_idx)
+    # 5. DAY PILLAR (Julian Day Method - 100% Accurate)
+    # Reference: 1900-01-01 was Gap-Sul (Index 10). JD at noon was 2415021.0
+    jd = gregorian_to_jd(year, month, day)
+    # JD 2415021 (1900/1/1) -> Index 10
+    # Difference from ref
+    day_offset = int(jd - 2415021 + 0.5) 
+    day_ganji_idx = (10 + day_offset) % 60
+    day_stem, day_branch = get_ganji_tuple(day_ganji_idx)
 
-    # Time
+    # 6. TIME PILLAR
     time_idx = ((hour + 1) // 2) % 12
     d_stem_idx = CHEONGAN.index(day_stem)
     t_stem_idx = ((d_stem_idx % 5) * 2 + time_idx) % 10
     time_stem, time_branch = CHEONGAN[t_stem_idx], JIJI[time_idx]
 
-    # 4. Result Construction
     full_str = f"{year_stem}{year_branch} {month_stem}{month_branch} {day_stem}{day_branch} {time_stem}{time_branch}"
     
     return {
-        "Year": f"{year_stem}{year_branch}",
-        "Month": f"{month_stem}{month_branch}",
-        "Day": f"{day_stem}{day_branch}",
-        "Time": f"{time_stem}{time_branch}",
-        "Day_Stem": day_stem,
-        "Month_Branch": month_branch,
+        "Year": f"{year_stem}{year_branch}", "Month": f"{month_stem}{month_branch}",
+        "Day": f"{day_stem}{day_branch}", "Time": f"{time_stem}{time_branch}",
+        "Day_Stem": day_stem, "Month_Branch": month_branch,
         "Full_String": full_str,
         "Ten_Gods": {
             "Year": calculate_ten_gods(day_stem, year_stem),
             "Month": calculate_ten_gods(day_stem, month_stem),
-            "Time": calculate_ten_gods(day_stem, time_stem)
-        },
-        "Shinsal": calculate_shinsal(full_str)
-    }
+            "Time
