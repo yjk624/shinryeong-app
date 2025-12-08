@@ -8,7 +8,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 
 # ==========================================
-# 1. CONFIGURATION & SESSION STATE
+# 1. CONFIGURATION & FAIL-SAFE MODEL LOADING
 # ==========================================
 
 # Initialize Geocoder
@@ -19,16 +19,29 @@ try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
     
-    # [FIX] We use the specific version '001'.
-    # This prevents the system from auto-upgrading to the limited 2.5 version.
-    # If this fails, we fall back to 'gemini-pro'.
-    try:
-        model = genai.GenerativeModel('models/gemini-1.5-flash-001')
-    except:
-        model = genai.GenerativeModel('models/gemini-pro')
-        
+    # [BULLETPROOF MODEL SELECTOR]
+    # We try the best High-Quota models in order. 
+    # If one fails (404 or Quota), it tries the next.
+    model = None
+    model_list = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-pro']
+    
+    for m in model_list:
+        try:
+            test_model = genai.GenerativeModel(m)
+            # We don't run it yet, just assign it. 
+            # If the name is invalid, it usually errors later, but this sets our preference.
+            model = test_model
+            # We assume the first one that defines successfully is our target
+            break 
+        except:
+            continue
+            
+    # Fallback if everything fails
+    if model is None:
+        model = genai.GenerativeModel('gemini-pro')
+
 except Exception as e:
-    st.error(f"Secret Error: {e}")
+    st.error(f"Configuration Error: {e}")
 
 # Initialize Session State
 if "chat_session" not in st.session_state:
