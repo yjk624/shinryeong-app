@@ -31,7 +31,7 @@ except Exception as e:
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v8.2 (최종 정밀도 개선)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v8.3 (최종 안정화)",
         "sidebar_title": "설정",
         "lang_btn": "English Mode",
         "reset_btn": "새로운 상담 시작",
@@ -48,7 +48,7 @@ UI_TEXT = {
     },
     "en": {
         "title": "🔮 Shinryeong Destiny Report",
-        "caption": "Authentic Saju Analysis System v8.2 (Final Accuracy)",
+        "caption": "Authentic Saju Analysis System v8.3 (Final Stability)",
         "sidebar_title": "Settings",
         "lang_btn": "한국어 모드",
         "reset_btn": "Reset Session",
@@ -66,7 +66,7 @@ UI_TEXT = {
 }
 
 # ==========================================
-# 2. CORE LOGIC ENGINE (v8.2 FIXES)
+# 2. CORE LOGIC ENGINE (v8.3 FIXES)
 # ==========================================
 def get_coordinates(city_input):
     clean = city_input.strip()
@@ -83,7 +83,7 @@ def get_ganji_year(year):
 
 def analyze_heavy_logic(saju_data):
     """
-    [FIXED] Season Weighted Score to ensure Sin-yak is correctly identified.
+    [FIXED] Season Weighted Score for accurate Sin-gang/Sin-yak.
     """
     day_stem = saju_data['Day'][0]
     month_branch = saju_data['Month'][3]
@@ -99,9 +99,9 @@ def analyze_heavy_logic(saju_data):
     
     score = 0
     
-    # 1. Season Check (Dominant Weight)
+    # 1. Season Check (Dominant Weight: -100 for Sil-ryeong)
     if month_elem in supporters[my_elem]: score += 100
-    else: score -= 100 # If not supported by season, score starts at -100
+    else: score -= 100 
 
     # 2. Deuk-se Check (Pillar Support)
     support_count = 0
@@ -117,10 +117,10 @@ def analyze_heavy_logic(saju_data):
             
     score += (support_count * 10)
     
-    # Final Diagnosis: 신강/신약 판별 (threshold remains 40)
+    # Final Diagnosis: 신강/신약 판별
     strength_term = "신강(Strong - 주도적)" if score >= 40 else "신약(Weak - 환경 민감)"
     
-    # 3. Future Trend (3 Years) - Simplified for brevity
+    # 3. Future Trend (3 Years)
     current_year = datetime.now().year
     trend_text = []
     day_branch = saju_data['Day'][3]
@@ -161,12 +161,14 @@ def generate_ai_response(messages, lang_mode):
     
     for model in models:
         try:
+            # Generate entire response at once (Stream=False) for stability
             stream = client.chat.completions.create(
-                model=model, messages=messages, temperature=0.6, max_tokens=3000, stream=False # STREAMING OFF FOR DEBUG
+                model=model, messages=messages, temperature=0.6, max_tokens=3000, stream=False
             )
-            # Fetch entire response text immediately (Fix for streaming issue on unstable connections)
             full_text = stream.choices[0].message.content
-            return full_text # Return full text, not generator
+            # Check for API-specific empty/failure response content
+            if full_text:
+                return full_text
         except Exception as e: 
             time_module.sleep(0.5)
             continue
@@ -174,14 +176,14 @@ def generate_ai_response(messages, lang_mode):
     return "⚠️ AI 연결 지연. 잠시 후 다시 시도해주세요."
 
 # ==========================================
-# 4. UI LAYOUT & MAIN ROUTER (FIXED)
+# 3. UI LAYOUT & MAIN ROUTER
 # ==========================================
 with st.sidebar:
     t = UI_TEXT[st.session_state.lang]
     st.title(t["sidebar_title"])
     
     # DIAGNOSTIC PANEL
-    with st.expander("🛠️ Debug Status", expanded=False):
+    with st.expander("🛠️ System Diagnostic", expanded=False):
         st.caption(f"Status: {'✅ Complete' if st.session_state.analysis_complete else '❌ Pending'}")
         st.caption(f"Msg Count: {len(st.session_state.messages)}")
 
@@ -198,7 +200,7 @@ st.title(t["title"])
 st.caption(t["caption"])
 st.warning(f"**[{t['warn_title']}]**\n\n{t['warn_text']}")
 
-# [STATE A] INPUT FORM (Generates and Stores Result, then Reruns)
+# [STATE A] INPUT FORM
 if not st.session_state.analysis_complete:
     with st.form("main_form"):
         c1, c2 = st.columns(2)
@@ -236,17 +238,14 @@ User Concern: "{concern}"
 
 [OUTPUT TEMPLATE]
 ## {t['title']}
-
 ### {titles['t1']}
 (Explain '{facts['metaphor']}' and '{facts['strength']}'. Trigger 
 
 [Image of Five Elements Cycle]
  to explain the balance.)
-
 ### {titles['t2']}
 (Analyze the trend below.)
 {facts['trend']}
-
 ### {titles['t3']}
 * **{titles['s1']}:** (Advice)
 * **{titles['s2']}:** (Mental)
@@ -254,20 +253,24 @@ User Concern: "{concern}"
 """
                     st.session_state.saju_context = sys_p
                     
-                    # 2. CRITICAL FIX: Generate full response before setting state and rerunning
+                    # 2. CRITICAL FIX: Generate full response BEFORE setting state and rerunning
                     msgs = [{"role": "system", "content": sys_p}, 
                             {"role": "user", "content": "Analyze."}]
                     
-                    # This now returns the full text, not a generator
+                    # Generate full response text (Blocking call)
                     full_resp = generate_ai_response(msgs, st.session_state.lang) 
                     
-                    # 3. Save State (No stream corruption possible now)
-                    st.session_state.messages.append({"role": "assistant", "content": full_resp})
-                    st.session_state.analysis_complete = True
-                    
-                    st.rerun()
+                    # 3. Check for API failure
+                    if full_resp.startswith("⚠️ AI 연결 지연"):
+                        # If failed, show error in current screen, do not transition state
+                        st.error(full_resp)
+                    else:
+                        # SUCCESS: Save the result and transition state
+                        st.session_state.messages.append({"role": "assistant", "content": full_resp})
+                        st.session_state.analysis_complete = True
+                        st.rerun()
 
-# [STATE B] CHAT INTERFACE (Display Stored Results)
+# [STATE B] CHAT INTERFACE
 else:
     # 1. Display History
     for m in st.session_state.messages:
@@ -282,7 +285,7 @@ else:
         ctxt.extend(st.session_state.messages[-4:])
         
         with st.chat_message("assistant"):
-            # Generate and stream immediately
+            # Blocking call for stability
             full_resp = generate_ai_response(ctxt, st.session_state.lang)
             st.markdown(full_resp)
             st.session_state.messages.append({"role": "assistant", "content": full_resp})
