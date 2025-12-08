@@ -19,9 +19,9 @@ try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
     
-    # [FIX] Switched to 'gemini-1.5-flash' explicitly.
-    # This model has a much higher free quota (1,500/day) compared to 2.5 (20/day).
-    model = genai.GenerativeModel('models/gemini-1.5-flash')
+    # [FIX] Switched to 'models/gemini-flash-latest'
+    # This worked for you previously and has the high 1,500/day free limit.
+    model = genai.GenerativeModel('models/gemini-flash-latest')
     
 except Exception as e:
     st.error(f"Secret Error: {e}")
@@ -48,7 +48,6 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         
-        # Make sure your sheet is named EXACTLY "Shinryeong_User_Data"
         sheet = client.open("Shinryeong_User_Data").sheet1
         
         input_date_str = birth_date_obj.strftime("%Y-%m-%d")
@@ -128,7 +127,6 @@ with st.sidebar:
     lang_code = "ko" if lang_choice == "한국어" else "en"
     txt = TRANS[lang_code]
     
-    # Reset Button
     if st.button(txt["reset_btn"]):
         st.session_state.messages = []
         st.session_state.chat_session = None
@@ -162,12 +160,10 @@ if not st.session_state.saju_context:
         else:
             with st.spinner(txt["loading"]):
                 try:
-                    # 1. Geocoding
                     location = geolocator.geocode(location_input, timeout=10)
                     if location:
                         lat, lon = location.latitude, location.longitude
                         
-                        # 2. Calculate Saju
                         saju_data = calculate_saju_v3(
                             birth_date.year, birth_date.month, birth_date.day,
                             birth_time.hour, birth_time.minute, lat, lon
@@ -175,7 +171,6 @@ if not st.session_state.saju_context:
                         saju_data['Birth_Place'] = location_input
                         saju_data['Gender'] = gender
                         
-                        # 3. Store Context in Session State
                         target_output_lang = "Korean" if lang_code == "ko" else "English"
                         
                         context_str = f"""
@@ -189,18 +184,14 @@ if not st.session_state.saju_context:
                         """
                         st.session_state.saju_context = context_str
                         
-                        # 4. Start Chat Session
                         st.session_state.chat_session = model.start_chat(history=[])
                         
-                        # 5. Send Initial Prompt
                         initial_prompt = f"{context_str}\n\nUser's First Concern: {user_question}\nAnalyze this."
                         response = st.session_state.chat_session.send_message(initial_prompt)
                         
-                        # 6. Save Initial Response
                         st.session_state.messages.append({"role": "user", "content": user_question})
                         st.session_state.messages.append({"role": "assistant", "content": response.text})
                         
-                        # 7. Log to DB
                         if not st.session_state.user_info_logged:
                             save_to_database(saju_data, birth_date, birth_time, user_question)
                             st.session_state.user_info_logged = True
@@ -222,17 +213,4 @@ else:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input(txt["chat_placeholder"]):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            with st.spinner("..."):
-                try:
-                    full_msg = f"[Context Reminder: {st.session_state.saju_context}]\nUser Question: {prompt}"
-                    response = st.session_state.chat_session.send_message(full_msg)
-                    st.markdown(response.text)
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
-                except Exception as e:
-                    st.error("Connection Error. Please try again.")
+    if prompt := st.chat_input(txt["chat
