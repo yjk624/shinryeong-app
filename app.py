@@ -8,44 +8,56 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 
 # ==========================================
-# 1. INTELLIGENT MODEL LOADER (2.0 Optimized)
+# 1. WIDE NET MODEL LOADER
 # ==========================================
 def get_working_model(api_key):
     genai.configure(api_key=api_key)
     
-    # We strictly use the models present in your specific list.
-    # Priority: Standard 2.0 Flash -> Lite Version -> Specific Version
+    # We try models in this specific order:
+    # 1. 2.0 Flash (Best quality/speed)
+    # 2. 2.0 Flash Lite (Backup)
+    # 3. 1.0 Pro (Old Reliable - This almost never fails)
     candidates = [
-        "models/gemini-2.0-flash",          # Best balance (Standard)
-        "models/gemini-2.0-flash-lite",     # Fallback (Often higher quota)
-        "models/gemini-2.0-flash-001"       # Pinned version
+        "models/gemini-2.0-flash",
+        "models/gemini-2.0-flash-001",
+        "models/gemini-2.0-flash-lite-preview-02-05",
+        "models/gemini-pro-latest",  # <-- The "Safety Net"
+        "models/gemini-pro"
     ]
+    
+    debug_logs = []
     
     for model_name in candidates:
         try:
             model = genai.GenerativeModel(model_name)
-            # Lightweight test to check connection
-            model.generate_content("test")
-            print(f"✅ Connected to: {model_name}")
-            return model
+            model.generate_content("test") # Test connection
+            return model, model_name, debug_logs
         except Exception as e:
-            print(f"⚠️ Skipped {model_name}: {e}")
+            # Record the error but keep trying
+            debug_logs.append(f"❌ {model_name} Failed: {str(e)}")
             continue
             
-    return None
+    return None, None, debug_logs
 
 # ==========================================
-# 2. CONFIGURATION
+# 2. CONFIGURATION & SETUP
 # ==========================================
-geolocator = Nominatim(user_agent="shinryeong_app_v4_final")
+geolocator = Nominatim(user_agent="shinryeong_app_v5_final")
 
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
-    model = get_working_model(API_KEY)
+    model, connected_model_name, logs = get_working_model(API_KEY)
     
     if model is None:
-        st.error("🚨 Critical Error: Could not connect to Gemini 2.0 models. Please check API Key quota.")
+        # If ALL failed, show the specific errors so we know why
+        st.error("🚨 Critical Connection Failure. Debug Logs:")
+        for log in logs:
+            st.warning(log)
         st.stop()
+    else:
+        # Optional: Show which model worked (Good for debugging)
+        # st.toast(f"Connected to: {connected_model_name}") 
+        pass
         
 except Exception as e:
     st.error(f"Setup Error: {e}")
@@ -86,7 +98,7 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
         ]
         sheet.append_row(row)
     except:
-        pass # Silent fail to keep app running
+        pass
 
 # ==========================================
 # 4. CITY DB (Fallback)
@@ -117,7 +129,7 @@ def get_coordinates(city_name):
 TRANS = {
     "ko": {
         "title": "🔮 신령 (Shinryeong)",
-        "subtitle": "AI 형이상학 분석가 (2.0 엔진)",
+        "subtitle": "AI 형이상학 분석가",
         "warning": "💡 **알림:** 결과는 참고용입니다.",
         "submit_btn": "🔮 분석 시작하기",
         "loading": "⏳ 신령 소환 중...",
@@ -127,7 +139,7 @@ TRANS = {
     },
     "en": {
         "title": "🔮 Shinryeong",
-        "subtitle": "AI Metaphysical Analyst (v2.0)",
+        "subtitle": "AI Metaphysical Analyst",
         "warning": "💡 **Notice:** For reference only.",
         "submit_btn": "🔮 Start Analysis",
         "loading": "⏳ Summoning Shinryeong...",
@@ -145,6 +157,9 @@ with st.sidebar:
     if st.button(txt["reset_btn"]):
         st.session_state.clear()
         st.rerun()
+    # Debug: Show connected model
+    if 'connected_model_name' in locals() and connected_model_name:
+        st.caption(f"Engine: `{connected_model_name}`")
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
