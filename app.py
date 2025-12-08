@@ -5,15 +5,15 @@ from datetime import datetime, time
 from geopy.geocoders import Nominatim
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import json
 import os
 
 # ==========================================
-# 1. CONFIGURATION (GROQ ENGINE)
+# 1. CONFIGURATION
 # ==========================================
-geolocator = Nominatim(user_agent="shinryeong_app_groq_v4")
+st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
+geolocator = Nominatim(user_agent="shinryeong_app_v6_final")
 
-# Initialize Groq Client
+# Initialize Groq
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -30,18 +30,20 @@ if "user_info_logged" not in st.session_state:
     st.session_state.user_info_logged = False
 
 # ==========================================
-# 2. KNOWLEDGE BASE LOADER (THE BRAIN)
+# 2. FILE LOADERS (BRAIN & SOUL)
 # ==========================================
 @st.cache_data
-def load_knowledge_base():
-    """Reads the text file that contains all Saju logic."""
+def load_text_file(filename):
+    """Reads external text files (Prompt & Knowledge)."""
     try:
-        # Tries to read the file from the same folder as app.py
-        with open("knowledgebase.txt", "r", encoding="utf-8") as f:
+        with open(filename, "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
-        st.error("⚠️ critical Error: 'knowledgebase.txt' not found in repository.")
-        return ""
+        return "" # Fail silently if file missing (but quality will drop)
+
+# LOAD THE SOUL (Persona) AND BRAIN (Knowledge)
+PROMPT_TEXT = load_text_file("prompt.txt") # Rename '신령 prompt .txt' to 'prompt.txt' on GitHub
+KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt") 
 
 # ==========================================
 # 3. DATABASE FUNCTION
@@ -98,7 +100,7 @@ def generate_ai_response(messages):
     stream = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=messages,
-        temperature=0.7,
+        temperature=0.6, # Slightly lowered for more consistent formatting
         max_tokens=2048,
         top_p=1,
         stream=True,
@@ -109,61 +111,89 @@ def generate_ai_response(messages):
             yield chunk.choices[0].delta.content
 
 # ==========================================
-# 5. UI LAYOUT
+# 5. UI LAYOUT & TRANSLATION
 # ==========================================
 TRANS = {
     "ko": {
         "title": "🔮 신령 (Shinryeong)",
         "subtitle": "AI 형이상학 분석가",
-        "warning": "💡 **알림:** 결과는 참고용입니다.",
-        "submit_btn": "🔮 분석 시작하기",
-        "loading": "⏳ 신령 소환 중...",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다.",
-        "chat_placeholder": "궁금한 점을 물어보세요...",
-        "reset_btn": "🔄 초기화"
+        # [FIXED] Matches strict legal disclaimer from Volume 6/Prompt
+        "warning": """
+        ⚖️ **법적 면책 조항 (Disclaimer):**
+        1. 본 서비스는 명리학 및 자미두수 데이터를 기반으로 한 **학술적 분석**이며, 절대적인 예언이 아닙니다.
+        2. 신령은 **의학적 진단(Medical Diagnosis)이나 법률적 조언(Legal Advice)**을 제공하지 않습니다.
+        3. 본 분석 결과에 따른 사용자의 결정과 그 결과에 대한 책임은 전적으로 **사용자 본인**에게 있습니다.
+        """,
+        "submit_btn": "🔮 신령에게 분석 요청하기",
+        "loading": "⏳ 천문 데이터를 계산하고 신령을 소환하는 중...",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다. 주요 도시명으로 다시 시도해주세요.",
+        "chat_placeholder": "추가로 궁금한 점이 있으신가요? (예: 내년의 재물운은?)",
+        "reset_btn": "🔄 새로운 분석 시작",
+        "dob_label": "생년월일",
+        "time_label": "태어난 시간",
+        "gender_label": "성별",
+        "male": "남성", 
+        "female": "여성",
+        "loc_label": "태어난 지역 (도시명)",
+        "loc_placeholder": "예: 서울, 부산, 뉴욕...",
+        "concern_label": "현재 가장 큰 고민은 무엇인가요?",
+        "concern_placeholder": "예: 직장 상사와의 갈등, 이직 문제, 연애운 등"
     },
     "en": {
         "title": "🔮 Shinryeong",
         "subtitle": "AI Metaphysical Analyst",
-        "warning": "💡 **Notice:** For reference only.",
-        "submit_btn": "🔮 Start Analysis",
-        "loading": "⏳ Summoning Shinryeong...",
-        "geo_error": "⚠️ Location not found.",
-        "chat_placeholder": "Ask a follow-up...",
-        "reset_btn": "🔄 Reset"
+        # [FIXED] English equivalent of the legal disclaimer
+        "warning": """
+        ⚖️ **Legal Disclaimer:**
+        1. This service provides **academic analysis** based on Saju and Jami Dou Shu data; it is not absolute prophecy.
+        2. Shinryeong does **NOT provide Medical Diagnoses or Legal Advice**.
+        3. The user bears full responsibility for any decisions made based on this analysis.
+        """,
+        "submit_btn": "🔮 Request Analysis",
+        "loading": "⏳ Calculating celestial data and summoning Shinryeong...",
+        "geo_error": "⚠️ Location not found. Please try a major city name.",
+        "chat_placeholder": "Do you have follow-up questions? (Ex: Wealth luck next year?)",
+        "reset_btn": "🔄 Start New Analysis",
+        "dob_label": "Date of Birth",
+        "time_label": "Time of Birth",
+        "gender_label": "Gender",
+        "male": "Male", 
+        "female": "Female",
+        "loc_label": "Birth Place (City)",
+        "loc_placeholder": "Ex: Seoul, New York, London...",
+        "concern_label": "What is your main concern?",
+        "concern_placeholder": "Ex: Career conflict, relationship advice, etc."
     }
 }
 
-st.set_page_config(page_title="신령", page_icon="🔮", layout="centered")
-
 with st.sidebar:
-    lang_code = "ko" if st.radio("Language", ["한국어", "English"]) == "한국어" else "en"
+    lang_code = "ko" if st.radio("Language / 언어", ["한국어", "English"]) == "한국어" else "en"
     txt = TRANS[lang_code]
     if st.button(txt["reset_btn"]):
-        st.session_state.clear()
+        st.session_state.messages = []
+        st.session_state.saju_context = ""
+        st.session_state.user_info_logged = False
         st.rerun()
     st.caption("Engine: Groq Llama-3.3")
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
+# Display the Warning Block
 st.info(txt["warning"])
 
 # ==========================================
 # 6. APP LOGIC
 # ==========================================
-# Load the Knowledge Base ONCE
-KNOWLEDGE_BASE_TEXT = load_knowledge_base()
-
 if not st.session_state.saju_context:
     with st.form("input"):
         col1, col2 = st.columns(2)
         with col1:
-            b_date = st.date_input("Date", min_value=datetime(1940,1,1))
-            b_time = st.time_input("Time", value=time(12,00), step=60)
+            b_date = st.date_input(txt["dob_label"], min_value=datetime(1940,1,1))
+            b_time = st.time_input(txt["time_label"], value=time(12,00), step=60)
         with col2:
-            gender = st.radio("Gender", ["Male", "Female"])
-            loc_in = st.text_input("Location (City)", placeholder="Seoul, Busan...")
-        q = st.text_area("Question", height=100)
+            gender = st.radio(txt["gender_label"], [txt["male"], txt["female"]])
+            loc_in = st.text_input(txt["loc_label"], placeholder=txt["loc_placeholder"])
+        q = st.text_area(txt["concern_label"], height=100, placeholder=txt["concern_placeholder"])
         submitted = st.form_submit_button(txt["submit_btn"])
 
     if submitted:
@@ -178,26 +208,20 @@ if not st.session_state.saju_context:
                     saju['Birth_Place'] = loc_in
                     saju['Gender'] = gender
                     
-                    # [CRITICAL UPDATE] Inject the Knowledge Base into the System Prompt
+                    # [CRITICAL] Inject PROMPT + KNOWLEDGE + USER DATA
+                    # This structure forces the AI to "Become" Shinryeong again.
                     ctx = f"""
-                    [ROLE DEFINITION]
-                    You are 'Shinryeong', a Metaphysical Analyst.
-                    - Tone: Hage-che (하게체) - Old sage style.
-                    - Language: ALWAYS respond in KOREAN (Hangul).
+                    [SYSTEM INSTRUCTION: PERSONA ADOPTION]
+                    {PROMPT_TEXT}
                     
                     [KNOWLEDGE BASE]
-                    Use the following rules to analyze the user's destiny. Do not summarize this; APPLY it.
-                    {KNOWLEDGE_BASE_TEXT}
+                    {KNOWLEDGE_TEXT}
                     
-                    [USER DATA]
+                    [USER DATA FOR ANALYSIS]
                     - Saju Pillars: {saju}
                     - Gender: {gender}
-                    - Location: {loc_in}
-                    
-                    [INSTRUCTION]
-                    Analyze the user's Saju structure based on the Knowledge Base. 
-                    Address their concern: "{q}"
-                    Do NOT mention 'Volume 4' or 'Knowledge Base' explicitly. Just give the advice.
+                    - Birth Location: {loc_in}
+                    - Output Language: {lang_code} (Respond in this language ONLY)
                     """
                     
                     st.session_state.saju_context = ctx
@@ -205,15 +229,13 @@ if not st.session_state.saju_context:
                     # Initial Prompt
                     msgs = [
                         {"role": "system", "content": ctx},
-                        {"role": "user", "content": q}
+                        {"role": "user", "content": f"My concern is: {q}. Please analyze my Saju and provide the solution based on the knowledge base."}
                     ]
                     
                     try:
-                        # Stream the response
                         stream = generate_ai_response(msgs)
                         response_text = st.write_stream(stream)
                         
-                        # Save to history
                         st.session_state.messages.append({"role": "user", "content": q})
                         st.session_state.messages.append({"role": "assistant", "content": response_text})
                         
@@ -235,7 +257,6 @@ else:
         st.session_state.messages.append({"role": "user", "content": p})
         with st.chat_message("user"): st.markdown(p)
         
-        # Prepare context + history for Groq
         groq_messages = [{"role": "system", "content": st.session_state.saju_context}]
         for m in st.session_state.messages:
             groq_messages.append({"role": m["role"], "content": m["content"]})
