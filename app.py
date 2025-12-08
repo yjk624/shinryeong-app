@@ -5,59 +5,48 @@ from datetime import datetime, time
 from geopy.geocoders import Nominatim
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import json
+import time as time_lib # Renamed to avoid conflict with datetime.time
 
 # ==========================================
-# 1. WIDE NET MODEL LOADER
+# 1. RETRY-ENABLED MODEL LOADER
 # ==========================================
 def get_working_model(api_key):
     genai.configure(api_key=api_key)
     
-    # We try models in this specific order:
-    # 1. 2.0 Flash (Best quality/speed)
-    # 2. 2.0 Flash Lite (Backup)
-    # 3. 1.0 Pro (Old Reliable - This almost never fails)
+    # We strictly target 1.5-Flash first because it is the designated "Free Tier" model.
+    # We AVOID "latest" aliases because they redirect to 2.5/Paid.
     candidates = [
-        "models/gemini-2.0-flash",
-        "models/gemini-2.0-flash-001",
-        "models/gemini-2.0-flash-lite-preview-02-05",
-        "models/gemini-pro-latest",  # <-- The "Safety Net"
-        "models/gemini-pro"
+        "models/gemini-1.5-flash",
+        "models/gemini-1.5-flash-001",
+        "models/gemini-1.5-flash-002",
+        "models/gemini-2.0-flash-exp", # Sometimes free
+        "models/gemini-2.0-flash"      # Sometimes free
     ]
-    
-    debug_logs = []
     
     for model_name in candidates:
         try:
             model = genai.GenerativeModel(model_name)
-            model.generate_content("test") # Test connection
-            return model, model_name, debug_logs
+            # Validation Test
+            model.generate_content("test")
+            return model, model_name
         except Exception as e:
-            # Record the error but keep trying
-            debug_logs.append(f"❌ {model_name} Failed: {str(e)}")
+            # If 429 (Quota), we might need to wait, but usually we just skip to the next model
             continue
             
-    return None, None, debug_logs
+    return None, None
 
 # ==========================================
-# 2. CONFIGURATION & SETUP
+# 2. SETUP
 # ==========================================
-geolocator = Nominatim(user_agent="shinryeong_app_v5_final")
+geolocator = Nominatim(user_agent="shinryeong_final_v6")
 
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
-    model, connected_model_name, logs = get_working_model(API_KEY)
+    model, model_name = get_working_model(API_KEY)
     
     if model is None:
-        # If ALL failed, show the specific errors so we know why
-        st.error("🚨 Critical Connection Failure. Debug Logs:")
-        for log in logs:
-            st.warning(log)
+        st.error("🚨 Account Limit Reached: Your Google Cloud account currently has 'Limit: 0' for all tested models. This usually resolves in 24 hours or by adding a billing account (Free Tier available).")
         st.stop()
-    else:
-        # Optional: Show which model worked (Good for debugging)
-        # st.toast(f"Connected to: {connected_model_name}") 
-        pass
         
 except Exception as e:
     st.error(f"Setup Error: {e}")
@@ -101,7 +90,7 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
         pass
 
 # ==========================================
-# 4. CITY DB (Fallback)
+# 4. CITY DB
 # ==========================================
 CITY_DB = {
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
@@ -133,7 +122,7 @@ TRANS = {
         "warning": "💡 **알림:** 결과는 참고용입니다.",
         "submit_btn": "🔮 분석 시작하기",
         "loading": "⏳ 신령 소환 중...",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다. 주요 도시명으로 입력하세요.",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다.",
         "chat_placeholder": "궁금한 점을 물어보세요...",
         "reset_btn": "🔄 초기화"
     },
@@ -157,9 +146,8 @@ with st.sidebar:
     if st.button(txt["reset_btn"]):
         st.session_state.clear()
         st.rerun()
-    # Debug: Show connected model
-    if 'connected_model_name' in locals() and connected_model_name:
-        st.caption(f"Engine: `{connected_model_name}`")
+    if model_name:
+        st.caption(f"Engine: `{model_name}`")
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
