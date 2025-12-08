@@ -8,12 +8,12 @@ from geopy.distance import great_circle # Used for nearest neighbor calculation
 import json 
 
 # ==========================================
-# 0. CONFIGURATION & CRITICAL STATE INITIALIZATION (FIXED)
+# 0. CONFIGURATION & CRITICAL STATE INITIALIZATION
 # ==========================================
 st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
-# CRITICAL FIX: Ensure all keys exist and fix the typo 'st.sessionin_state'
-if "lang" not in st.session_state: st.session_state.lang = "ko" # FIX APPLIED HERE
+# CRITICAL FIX: Initialize all keys safely at the top.
+if "lang" not in st.session_state: st.session_state.lang = "ko"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
@@ -57,7 +57,7 @@ UI_TEXT = {
 }
 
 # ==========================================
-# 2. CORE LOGIC ENGINE (v11.4 - Logic Reimplementation)
+# 2. CORE LOGIC ENGINE (v11.4)
 # ==========================================
 CITY_DB = {
     "서울": (37.56, 126.97), "부산": (35.17, 129.07), "인천": (37.45, 126.70), 
@@ -80,9 +80,14 @@ def get_coordinates(city_input):
             
     return None, None
 
+def get_ganji_year(year):
+    gan = ["갑", "을", "병", "정", "무", "기", "경", "신", "임", "계"]
+    ji = ["자", "축", "인", "묘", "진", "사", "오", "미", "신", "유", "술", "해"]
+    return gan[(year - 4) % 10], ji[(year - 4) % 12]
+
 def analyze_heavy_logic(saju_data, coords):
     """
-    Final logic for robust fact injection.
+    Final robust logic for fact injection.
     """
     day_stem = saju_data['Day'][0]
     month_branch = saju_data['Month'][3]
@@ -115,15 +120,22 @@ def analyze_heavy_logic(saju_data, coords):
     
     # 3. Shinsal (살) Injection
     shinsal_list = []
-    if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 이동과 변화")
+    if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 활동성 강함, 이동과 변화")
     if any(x in full_str for x in ["자", "오", "묘", "유"]): shinsal_list.append("도화살(桃花煞): 인기를 끌고 주목받는 매력")
     shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "평온한 기운"
 
     # 4. Future Trend (3 Years)
     current_year = datetime.now().year
-    trend_text = []
-    # (Trend logic is detailed in the actual prompt)
+    trend_data = []
+    day_branch = saju_data['Day'][3]
+    clashes = {"자":"오", "축":"미", "인":"신", "묘":"유", "진":"술", "사":"해", "오":"자", "미":"축", "신":"인", "유":"묘", "술":"진", "해":"사"}
     
+    for y in range(current_year, current_year+3):
+        stem, branch = get_ganji_year(y)
+        rel_msg = "안정 (Stability)"
+        if clashes.get(day_branch) == branch: rel_msg = f"⚠️ 충(Clash) - 변화와 이동수"
+        trend_data.append(f"{y}년({stem}{branch}년): {rel_msg}")
+
     # 5. Lucky Color
     weak_colors = {'목':'검은색(수)', '화':'초록색(목)', '토':'붉은색(화)', '금':'노란색(토)', '수':'흰색(금)'}
     lucky_color = weak_colors.get(my_elem) if score < 40 else '흰색'
@@ -132,7 +144,7 @@ def analyze_heavy_logic(saju_data, coords):
         "metaphor": identity_db.get(day_stem, "기운"),
         "strength": strength_term,
         "shinsal": shinsal_summary,
-        "trend": trend_text,
+        "trend": trend_data,
         "lucky_color": lucky_color
     }
 
@@ -140,8 +152,10 @@ def generate_ai_response(messages, lang_mode):
     # System Instruction Injection (Tighter language control)
     instruction = (
         "[CRITICAL INSTRUCTION]\n"
-        f"Language: {lang_mode.upper()} ONLY. DO NOT use English or any foreign language words in the output text body. Use '하게체' Persona.\n"
-        "Explain complex terms (Hanja/Saju terms like 신강, 역마살) in simple Korean sentences immediately after using them.\n"
+        f"Language: {lang_mode.upper()} ONLY. DO NOT use English or any foreign language words (e.g., Master, Level, VS, or, жел정) in the output text body.\n"
+        "Persona: Use the formal and mystical '하게체' (~하네, ~라네).\n"
+        "RULE: Every time a complex Saju term (e.g., 신강, 신약, 역마살, 도화살) is used, define it immediately in simple Korean sentences (e.g., '신강이란 곧은 소나무와 같은 힘을 말하는 것일세.').\n"
+        "RULE: When asked a follow-up question (e.g., '재물운'), analyze the stored SAJU DATA CONTEXT for relevant elements and provide a pinpoint, detailed answer, not a generic report summary.\n"
     )
     if messages[0]['role'] == 'system':
         messages[0]['content'] += "\n" + instruction
@@ -182,7 +196,6 @@ def run_full_analysis_and_store(raw_data):
         coords, city_name = get_coordinates(raw_data['city'])
         
         if not coords:
-            # FAILURE POINT 0: Geocoding
             st.session_state.last_error_log = f"❌ GeoCoding Failed for {raw_data['city']}."
             raise Exception(f"GeoCoding Failed for {raw_data['city']}.")
 
@@ -196,7 +209,7 @@ def run_full_analysis_and_store(raw_data):
         progress_container.info("STEP 2/5: Saju pillars derived. Running heavy metaphysical analysis...")
         facts = analyze_heavy_logic(saju, coords)
 
-        # 3. Prompt Setup
+        # 3. Prompt Construction
         progress_container.info("STEP 3/5: Context generation successful. Preparing for AI call...")
         
         if st.session_state.lang == "ko":
@@ -207,7 +220,7 @@ def run_full_analysis_and_store(raw_data):
         sys_p = f"""
 [SYSTEM ROLE]
 You are 'Shinryeong'. Language: {st.session_state.lang.upper()}. Persona: Use the formal and mystical '하게체' (~하네, ~라네).
-[IMPORTANT: EXPLAIN COMPLEX TERMS SIMPLY. NO ENGLISH/FOREIGN LANGUAGE IN OUTPUT.]
+[IMPORTANT: EXPLAIN COMPLEX TERMS SIMPLY. NO FOREIGN LANGUAGE IN OUTPUT.]
 Input Facts: {facts}
 User Concern: "{raw_data['concern']}"
 
