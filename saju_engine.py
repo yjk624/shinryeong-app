@@ -41,37 +41,40 @@ def calculate_shinsal(full_str):
     return shinsal
 
 def calculate_saju_v3(year, month, day, hour, minute, lat, lon):
+    # 1. Observer Setup
     observer = ephem.Observer()
     observer.lat = str(lat)
     observer.lon = str(lon)
     birth_date_kst = datetime(year, month, day, hour, minute)
     observer.date = birth_date_kst - timedelta(hours=9)
 
+    # 2. Solar Longitude
     sun = ephem.Sun(observer)
     sun.compute(observer)
     sun_lon_deg = math.degrees(ephem.Ecliptic(sun).lon)
     if sun_lon_deg < 0: sun_lon_deg += 360
 
-    # Year Pillar
+    # 3. YEAR PILLAR
     saju_year = year - 1 if (month <= 2 and 270 <= sun_lon_deg < 315) else year
     year_ganji_idx = (saju_year - 1924) % 60
     year_stem, year_branch = get_ganji_tuple(year_ganji_idx)
 
-    # Month Pillar
+    # 4. MONTH PILLAR
     term_deg = (sun_lon_deg - 315) if sun_lon_deg >= 315 else (sun_lon_deg + 45)
     month_idx = int(term_deg // 30) % 12
     y_stem_idx = CHEONGAN.index(year_stem)
     m_stem_idx = ((y_stem_idx % 5) * 2 + 2 + month_idx) % 10
     month_stem, month_branch = CHEONGAN[m_stem_idx], JIJI[(2 + month_idx) % 12]
 
-    # Day Pillar (Anchor Method)
+    # 5. DAY PILLAR (Absolute Date Method)
+    # 1924-01-01 was Gap-Ja (Index 0)
     base_date = date(1924, 1, 1)
     target_date = date(year, month, day)
     delta_days = (target_date - base_date).days
     day_ganji_idx = delta_days % 60
     day_stem, day_branch = get_ganji_tuple(day_ganji_idx)
 
-    # Time Pillar
+    # 6. TIME PILLAR
     time_idx = ((hour + 1) // 2) % 12
     d_stem_idx = CHEONGAN.index(day_stem)
     t_stem_idx = ((d_stem_idx % 5) * 2 + time_idx) % 10
