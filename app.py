@@ -6,7 +6,7 @@ import time as time_module
 from geopy.geocoders import Nominatim
 
 # ==========================================
-# 0. CONFIGURATION & CRITICAL STATE INITIALIZATION (FIXED)
+# 0. CONFIGURATION & CRITICAL STATE INITIALIZATION
 # ==========================================
 st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
@@ -32,7 +32,7 @@ except Exception as e:
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.4 (최종 안정화)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.5 (최종 안정화)",
         "sidebar_title": "설정",
         "lang_btn": "English Mode",
         "reset_btn": "새로운 상담 시작",
@@ -49,7 +49,7 @@ UI_TEXT = {
     },
     "en": {
         "title": "🔮 Shinryeong Destiny Report",
-        "caption": "Authentic Saju Analysis System v10.4 (Final Stability)",
+        "caption": "Authentic Saju Analysis System v10.5 (Final Stability)",
         "sidebar_title": "Settings",
         "lang_btn": "한국어 모드",
         "reset_btn": "Reset Session",
@@ -67,7 +67,7 @@ UI_TEXT = {
 }
 
 # ==========================================
-# 2. CORE LOGIC ENGINE (v10.4)
+# 2. CORE LOGIC ENGINE (v10.5)
 # ==========================================
 def get_coordinates(city_input):
     clean = city_input.strip()
@@ -84,13 +84,13 @@ def get_ganji_year(year):
 
 def analyze_heavy_logic(saju_data):
     """
-    Comprehensive analysis including all requested facts.
+    Final logic for robust fact injection.
     """
     day_stem = saju_data['Day'][0]
     month_branch = saju_data['Month'][3]
     full_str = saju_data['Year'] + saju_data['Month'] + saju_data['Day'] + saju_data['Time']
     
-    # 1. Strength Calculation
+    # 1. Strength Calculation (Retained fix)
     season_elem_map = {'인': '목', '묘': '목', '진': '목', '사': '화', '오': '화', '미': '화', '신': '금', '유': '금', '술': '금', '해': '수', '자': '수', '축': '수'}
     day_elem_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
     my_elem = day_elem_map.get(day_stem, '토')
@@ -117,7 +117,7 @@ def analyze_heavy_logic(saju_data):
     
     # 3. Shinsal (살) Injection
     shinsal_list = []
-    if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 활동성 강함, 이동과 변화")
+    if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 이동과 변화")
     if any(x in full_str for x in ["자", "오", "묘", "유"]): shinsal_list.append("도화살(桃花煞): 인기를 끌고 주목받는 매력")
     if any(x in full_str for x in ["갑", "신", "묘", "오"]): shinsal_list.append("현침살(懸針煞): 예민한 감각, 정밀한 기술")
     shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "평온한 기운"
@@ -151,7 +151,6 @@ def generate_ai_response(messages, lang_mode):
     instruction = (
         "[CRITICAL INSTRUCTION]\n"
         f"Language: {lang_mode.upper()} ONLY.\n"
-        "If Korean: Use Titles: '1. 타고난 그릇', '2. 미래 흐름', '3. 신령의 처방'.\n"
         "Explain Chinese characters (Hanja) easily. Ensure detailed, multi-sentence response per section.\n"
     )
     if messages[0]['role'] == 'system':
@@ -174,7 +173,7 @@ def generate_ai_response(messages, lang_mode):
     return "⚠️ AI 연결 지연. 잠시 후 다시 시도해주세요."
 
 # ==========================================
-# 3. UI LAYOUT & MAIN ROUTER (FINAL FIX)
+# 3. UI LAYOUT & MAIN ROUTER (FIXED)
 # ==========================================
 with st.sidebar:
     t = UI_TEXT[st.session_state.lang]
@@ -223,7 +222,7 @@ if not st.session_state.analysis_complete:
                                            time_val.hour, time_val.minute, coords[0], coords[1])
                     facts = analyze_heavy_logic(saju)
                     
-                    # 1. Prompt Setup
+                    # 1. Prompt Setup (Store the full script)
                     if st.session_state.lang == "ko":
                         titles = {"t1": "1. 🐅 타고난 그릇과 기질", "t2": "2. ☁️ 다가올 미래의 흐름과 리스크 (3년)", "t3": "3. ⚡ 신령의 처방 및 개운", "s1": "행동", "s2": "마인드셋", "s3": "개운법"}
                     else:
@@ -276,11 +275,10 @@ else:
             else:
                 st.session_state.messages.append({"role": "assistant", "content": full_resp})
                 
-            # Transition state to display history cleanly (Final Rerun)
-            st.rerun() 
+            # Transition state to display history cleanly (No Rerun needed here)
 
 
-    # 2. Display History
+    # 2. Display History (This will naturally display the message saved above)
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
         
