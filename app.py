@@ -31,7 +31,7 @@ except Exception as e:
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v8.1 (정밀도 개선)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v8.2 (최종 정밀도 개선)",
         "sidebar_title": "설정",
         "lang_btn": "English Mode",
         "reset_btn": "새로운 상담 시작",
@@ -48,7 +48,7 @@ UI_TEXT = {
     },
     "en": {
         "title": "🔮 Shinryeong Destiny Report",
-        "caption": "Authentic Saju Analysis System v8.1 (Accuracy Improved)",
+        "caption": "Authentic Saju Analysis System v8.2 (Final Accuracy)",
         "sidebar_title": "Settings",
         "lang_btn": "한국어 모드",
         "reset_btn": "Reset Session",
@@ -66,7 +66,7 @@ UI_TEXT = {
 }
 
 # ==========================================
-# 2. CORE LOGIC ENGINE (Sin-gang/Sin-yak FIX)
+# 2. CORE LOGIC ENGINE (v8.2 FIXES)
 # ==========================================
 def get_coordinates(city_input):
     clean = city_input.strip()
@@ -83,14 +83,14 @@ def get_ganji_year(year):
 
 def analyze_heavy_logic(saju_data):
     """
-    [CRITICAL FIX: Season Weighted Score]
-    Guarantees Sin-yak for hostile season Saju like Gye-Su in O-Wol.
+    [FIXED] Season Weighted Score to ensure Sin-yak is correctly identified.
     """
     day_stem = saju_data['Day'][0]
     month_branch = saju_data['Month'][3]
     full_str = saju_data['Year'] + saju_data['Month'] + saju_data['Day'] + saju_data['Time']
     
-    # Element Mappings
+    # Mappings
+    identity_db = {'갑': "거목", '을': "화초", '병': "태양", '정': "촛불", '무': "태산", '기': "대지", '경': "바위", '신': "보석", '임': "바다", '계': "빗물"}
     season_elem_map = {'인': '목', '묘': '목', '진': '목', '사': '화', '오': '화', '미': '화', '신': '금', '유': '금', '술': '금', '해': '수', '자': '수', '축': '수'}
     day_elem_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
     my_elem = day_elem_map.get(day_stem, '토')
@@ -99,11 +99,11 @@ def analyze_heavy_logic(saju_data):
     
     score = 0
     
-    # 1. Season Check (Highest Weight: +100/-100)
+    # 1. Season Check (Dominant Weight)
     if month_elem in supporters[my_elem]: score += 100
-    else: score -= 100 # Kim Yongjun case starts here (-100)
-        
-    # 2. Deuk-se Check (Pillar Support: +10 per char)
+    else: score -= 100 # If not supported by season, score starts at -100
+
+    # 2. Deuk-se Check (Pillar Support)
     support_count = 0
     for char in full_str:
         char_elem = ""
@@ -113,15 +113,14 @@ def analyze_heavy_logic(saju_data):
         elif char in "경신신유": char_elem = '금'
         elif char in "임계해자": char_elem = '수'
         
-        if char_elem in supporters[my_elem]:
-            support_count += 1
+        if char_elem in supporters[my_elem]: support_count += 1
             
     score += (support_count * 10)
     
-    # Final Diagnosis: Must pass a high threshold to override Sil-ryeong
+    # Final Diagnosis: 신강/신약 판별 (threshold remains 40)
     strength_term = "신강(Strong - 주도적)" if score >= 40 else "신약(Weak - 환경 민감)"
-
-    # 3. Future Trend (3 Years) - Retained Logic
+    
+    # 3. Future Trend (3 Years) - Simplified for brevity
     current_year = datetime.now().year
     trend_text = []
     day_branch = saju_data['Day'][3]
@@ -133,8 +132,6 @@ def analyze_heavy_logic(saju_data):
         rel_msg = "안정 (Stability)"
         if clashes.get(day_branch) == branch: rel_msg = f"⚠️ 충(Clash) - 변화와 이동수"
         elif harmonies.get(day_branch) == branch: rel_msg = f"✨ 합(Harmony) - 계약운, 협력"
-        elif branch in ["인", "신", "사", "해"]: rel_msg = f"🐎 역마(Movement) - 활동성 증가"
-        elif branch in ["자", "오", "묘", "유"]: rel_msg = f"🌸 도화(Attraction) - 인기 상승"
         trend_text.append(f"- **{y}년({stem}{branch}년):** {rel_msg}")
     
     # 4. Lucky Color
@@ -143,7 +140,7 @@ def analyze_heavy_logic(saju_data):
     lucky_color = weak_colors.get(my_elem) if score < 40 else strong_colors.get(my_elem)
 
     return {
-        "metaphor": metaphor,
+        "metaphor": identity_db.get(day_stem, "기운"),
         "strength": strength_term,
         "trend": "\n".join(trend_text),
         "lucky_color": lucky_color
@@ -160,30 +157,34 @@ def generate_ai_response(messages, lang_mode):
     if messages[0]['role'] == 'system':
         messages[0]['content'] += "\n" + instruction
     
-    # Robust Model List (Including high-performance models)
     models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"]
     
     for model in models:
         try:
             stream = client.chat.completions.create(
-                model=model, messages=messages, temperature=0.6, max_tokens=3000, stream=True
+                model=model, messages=messages, temperature=0.6, max_tokens=3000, stream=False # STREAMING OFF FOR DEBUG
             )
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-            return # Success
-        except: 
+            # Fetch entire response text immediately (Fix for streaming issue on unstable connections)
+            full_text = stream.choices[0].message.content
+            return full_text # Return full text, not generator
+        except Exception as e: 
             time_module.sleep(0.5)
             continue
             
-    yield "⚠️ AI 연결 지연. 잠시 후 다시 시도해주세요."
+    return "⚠️ AI 연결 지연. 잠시 후 다시 시도해주세요."
 
 # ==========================================
-# 3. UI LAYOUT & MAIN ROUTER (FIXED)
+# 4. UI LAYOUT & MAIN ROUTER (FIXED)
 # ==========================================
 with st.sidebar:
     t = UI_TEXT[st.session_state.lang]
     st.title(t["sidebar_title"])
+    
+    # DIAGNOSTIC PANEL
+    with st.expander("🛠️ Debug Status", expanded=False):
+        st.caption(f"Status: {'✅ Complete' if st.session_state.analysis_complete else '❌ Pending'}")
+        st.caption(f"Msg Count: {len(st.session_state.messages)}")
+
     if st.button(t["lang_btn"]):
         st.session_state.lang = "en" if st.session_state.lang == "ko" else "ko"
         st.rerun()
@@ -221,7 +222,7 @@ if not st.session_state.analysis_complete:
                                            time_val.hour, time_val.minute, coords[0], coords[1])
                     facts = analyze_heavy_logic(saju)
                     
-                    # --- CRITICAL STEP: Store all facts before Rerun ---
+                    # 1. Prompt Setup
                     if st.session_state.lang == "ko":
                         titles = {"t1": "1. 🐅 타고난 그릇과 기질", "t2": "2. ☁️ 다가올 미래의 흐름과 리스크 (3년)", "t3": "3. ⚡ 신령의 처방 및 개운", "s1": "행동", "s2": "마인드셋", "s3": "개운법"}
                     else:
@@ -235,54 +236,44 @@ User Concern: "{concern}"
 
 [OUTPUT TEMPLATE]
 ## {t['title']}
+
 ### {titles['t1']}
 (Explain '{facts['metaphor']}' and '{facts['strength']}'. Trigger 
 
 [Image of Five Elements Cycle]
-.)
+ to explain the balance.)
+
 ### {titles['t2']}
 (Analyze the trend below.)
 {facts['trend']}
+
 ### {titles['t3']}
 * **{titles['s1']}:** (Advice)
 * **{titles['s2']}:** (Mental)
 * **{titles['s3']}:** (Color: {facts['lucky_color']})
 """
                     st.session_state.saju_context = sys_p
-                    st.session_state.analysis_complete = True
-                    st.session_state.submit_trigger = True # New flag to trigger generation after rerun
                     
-                    # Save a placeholder message to ensure history transition works
-                    st.session_state.messages.append({"role": "system_info", "content": f"분석 요청 완료: {city_name} 기준"})
+                    # 2. CRITICAL FIX: Generate full response before setting state and rerunning
+                    msgs = [{"role": "system", "content": sys_p}, 
+                            {"role": "user", "content": "Analyze."}]
+                    
+                    # This now returns the full text, not a generator
+                    full_resp = generate_ai_response(msgs, st.session_state.lang) 
+                    
+                    # 3. Save State (No stream corruption possible now)
+                    st.session_state.messages.append({"role": "assistant", "content": full_resp})
+                    st.session_state.analysis_complete = True
                     
                     st.rerun()
 
-# [STATE B] CHAT INTERFACE (FIXED: Generation happens AFTER the state is set)
+# [STATE B] CHAT INTERFACE (Display Stored Results)
 else:
-    # 1. Trigger Initial Generation (If coming from form submit)
-    if st.session_state.get("submit_trigger", False):
-        st.session_state.submit_trigger = False # Reset flag
-
-        # Run the generation process outside the form, inside the main container
-        with st.chat_message("assistant"):
-            full_resp = ""
-            res_box = st.empty()
-            msgs = [{"role": "system", "content": st.session_state.saju_context}, 
-                    {"role": "user", "content": "Analyze."}]
-            
-            for chunk in generate_ai_response(msgs, st.session_state.lang):
-                full_resp += chunk
-                res_box.markdown(full_resp + "▌")
-            res_box.markdown(full_resp)
-            st.session_state.messages.append({"role": "assistant", "content": full_resp})
-
-    # 2. Display History (Including the newly generated one)
+    # 1. Display History
     for m in st.session_state.messages:
-        # Skip the temporary system info message for cleaner display
-        if m["role"] != "system_info": 
-            with st.chat_message(m["role"]): st.markdown(m["content"])
+        with st.chat_message(m["role"]): st.markdown(m["content"])
         
-    # 3. Follow-up Input
+    # 2. Follow-up Input
     if q := st.chat_input(t["placeholder"]):
         st.session_state.messages.append({"role": "user", "content": q})
         with st.chat_message("user"): st.markdown(q)
@@ -291,10 +282,7 @@ else:
         ctxt.extend(st.session_state.messages[-4:])
         
         with st.chat_message("assistant"):
-            full_resp = ""
-            res_box = st.empty()
-            for chunk in generate_ai_response(ctxt, st.session_state.lang):
-                full_resp += chunk
-                res_box.markdown(full_resp + "▌")
-            res_box.markdown(full_resp)
+            # Generate and stream immediately
+            full_resp = generate_ai_response(ctxt, st.session_state.lang)
+            st.markdown(full_resp)
             st.session_state.messages.append({"role": "assistant", "content": full_resp})
