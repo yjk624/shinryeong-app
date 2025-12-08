@@ -9,11 +9,10 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 
 # ==========================================
-# 1. CONFIGURATION & FALLBACK DATA
+# 1. CONFIGURATION & FAIL-SAFE MODEL LOADING
 # ==========================================
 
 # A. Internal City Database (Safety Shield)
-# This prevents the app from crashing for common locations if the API is blocked.
 CITY_DB = {
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
     "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
@@ -22,46 +21,33 @@ CITY_DB = {
     "대전": (36.35, 127.38), "Daejeon": (36.35, 127.38),
     "광주": (35.15, 126.85), "Gwangju": (35.15, 126.85),
     "울산": (35.53, 129.31), "Ulsan": (35.53, 129.31),
-    "세종": (36.48, 127.28), "Sejong": (36.48, 127.28),
-    "수원": (37.26, 127.02), "Suwon": (37.26, 127.02),
-    "성남": (37.42, 127.12), "Seongnam": (37.42, 127.12),
-    "전주": (35.82, 127.14), "Jeonju": (35.82, 127.14),
     "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
-    "창원": (35.22, 128.68), "Changwon": (35.22, 128.68),
-    "고양": (37.65, 126.83), "Goyang": (37.65, 126.83),
-    "용인": (37.24, 127.17), "Yongin": (37.24, 127.17),
-    "청주": (36.64, 127.48), "Cheongju": (36.64, 127.48),
-    "강릉": (37.75, 128.87), "Gangneung": (37.75, 128.87),
-    "춘천": (37.88, 127.72), "Chuncheon": (37.88, 127.72),
     "New York": (40.71, -74.00), "뉴욕": (40.71, -74.00),
     "London": (51.50, -0.12), "런던": (51.50, -0.12),
     "Paris": (48.85, 2.35), "파리": (48.85, 2.35),
-    "Tokyo": (35.67, 139.65), "도쿄": (35.67, 139.65),
-    "Beijing": (39.90, 116.40), "베이징": (39.90, 116.40),
-    "Los Angeles": (34.05, -118.24), "LA": (34.05, -118.24)
+    "Tokyo": (35.67, 139.65), "도쿄": (35.67, 139.65)
 }
 
-# B. Initialize External Geocoder (For other cities)
-# We use a unique user-agent to try to avoid blocks
+# B. Initialize External Geocoder
 geolocator = Nominatim(user_agent="shinryeong_app_v2_custom_unique_id")
 
-# C. Configure Gemini API with Fail-Safe Logic
+# C. Configure Gemini API with INVINCIBLE Fallback
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
     
-    # Try preferred stable models first
+    # [LOGIC] Try the Best Model -> If it fails -> Use the Old Reliable Model
     model = None
-    options = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-pro']
-    for m in options:
+    try:
+        # First Choice: Flash (Fast, High Quota)
+        model = genai.GenerativeModel('models/gemini-1.5-flash')
+    except:
         try:
-            test_model = genai.GenerativeModel(m)
-            model = test_model
-            break 
+            # Second Choice: Flash Latest
+            model = genai.GenerativeModel('models/gemini-flash-latest')
         except:
-            continue
-    if not model:
-        model = genai.GenerativeModel('gemini-pro') # Last resort
+            # Last Resort: Gemini Pro (Old but Stable)
+            model = genai.GenerativeModel('models/gemini-pro')
 
 except Exception as e:
     st.error(f"Configuration Error: {e}")
@@ -80,29 +66,16 @@ if "user_info_logged" not in st.session_state:
 # 2. HELPER FUNCTIONS
 # ==========================================
 def get_coordinates(city_name):
-    """
-    Hybrid Geocoding: 
-    1. Checks internal DB first (Fast, No Errors).
-    2. Tries API second (For obscure places).
-    3. Returns None if both fail.
-    """
-    # 1. Clean input
+    """Hybrid Geocoding: Check DB first, then API."""
     clean_name = city_name.strip()
-    
-    # 2. Check Internal DB
     if clean_name in CITY_DB:
         return CITY_DB[clean_name]
-    
-    # 3. Try API (with error handling)
     try:
         location = geolocator.geocode(clean_name, timeout=5)
         if location:
             return (location.latitude, location.longitude)
-    except Exception as e:
-        print(f"API Geocoding Failed: {e}")
-        # If API is blocked, we can't do anything for obscure cities.
+    except:
         return None
-        
     return None
 
 def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
@@ -113,17 +86,12 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
-        
         sheet = client.open("Shinryeong_User_Data").sheet1
         
-        input_date_str = birth_date_obj.strftime("%Y-%m-%d")
-        input_time_str = birth_time_obj.strftime("%H:%M")
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
         row = [
-            timestamp,
-            input_date_str,
-            input_time_str,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            birth_date_obj.strftime("%Y-%m-%d"),
+            birth_time_obj.strftime("%H:%M"),
             str(user_data.get('Birth_Place', 'Unknown')),
             user_data.get('Gender', 'Unknown'),
             user_data.get('Year', ''),
@@ -152,13 +120,13 @@ TRANS = {
         "male": "남성",
         "female": "여성",
         "loc_label": "태어난 장소 (도시명 입력)",
-        "loc_placeholder": "예: 서울, 부산, 창원, 뉴욕 (주요 도시는 즉시 인식됩니다)",
+        "loc_placeholder": "예: 서울, 부산, 창원, 뉴욕...",
         "concern_label": "당신의 고민을 털어놓으시오",
         "concern_placeholder": "예: 재물운이 언제쯤 트일까요?",
         "submit_btn": "🔮 분석 시작하기",
         "loading": "⏳ 운명을 계산하고 신령을 소환하는 중...",
-        "geo_error": "⚠️ 위치를 찾을 수 없거나 통신 오류가 발생했습니다. '서울', '부산' 등 주요 도시명으로 다시 시도해주세요.",
-        "chat_placeholder": "신령에게 더 물어보고 싶은 것이 있나? (예: 내년 연애운은? 건강은?)",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다. 주요 도시명으로 입력해주세요.",
+        "chat_placeholder": "신령에게 더 물어보고 싶은 것이 있나?",
         "reset_btn": "🔄 새로운 사주 분석하기"
     },
     "en": {
@@ -176,14 +144,14 @@ TRANS = {
         "concern_placeholder": "Ex: When will my financial luck improve?",
         "submit_btn": "🔮 Start Analysis",
         "loading": "⏳ Calculating destiny...",
-        "geo_error": "⚠️ Location not found or connection error. Please try a major city name.",
+        "geo_error": "⚠️ Location not found. Please try a major city.",
         "chat_placeholder": "Ask a follow-up question...",
         "reset_btn": "🔄 Analyze New Person"
     }
 }
 
 # ==========================================
-# 4. UI LAYOUT & MAIN LOGIC
+# 4. UI LAYOUT
 # ==========================================
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
 
@@ -223,13 +191,10 @@ if not st.session_state.saju_context:
             st.error(txt["geo_error"])
         else:
             with st.spinner(txt["loading"]):
-                # [NEW] Hybrid Geocoding Call
                 coords = get_coordinates(location_input)
                 
                 if coords:
                     lat, lon = coords
-                    
-                    # Calculate Saju
                     saju_data = calculate_saju_v3(
                         birth_date.year, birth_date.month, birth_date.day,
                         birth_time.hour, birth_time.minute, lat, lon
@@ -251,23 +216,24 @@ if not st.session_state.saju_context:
                     st.session_state.saju_context = context_str
                     
                     # Start Chat
-                    st.session_state.chat_session = model.start_chat(history=[])
-                    
-                    initial_prompt = f"{context_str}\n\nUser's First Concern: {user_question}\nAnalyze this."
-                    
-                    try:
-                        response = st.session_state.chat_session.send_message(initial_prompt)
-                        st.session_state.messages.append({"role": "user", "content": user_question})
-                        st.session_state.messages.append({"role": "assistant", "content": response.text})
-                        
-                        if not st.session_state.user_info_logged:
-                            save_to_database(saju_data, birth_date, birth_time, user_question)
-                            st.session_state.user_info_logged = True
-                        
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"AI Connection Error: {e}")
-
+                    if model:
+                        try:
+                            st.session_state.chat_session = model.start_chat(history=[])
+                            initial_prompt = f"{context_str}\n\nUser's First Concern: {user_question}\nAnalyze this."
+                            response = st.session_state.chat_session.send_message(initial_prompt)
+                            
+                            st.session_state.messages.append({"role": "user", "content": user_question})
+                            st.session_state.messages.append({"role": "assistant", "content": response.text})
+                            
+                            if not st.session_state.user_info_logged:
+                                save_to_database(saju_data, birth_date, birth_time, user_question)
+                                st.session_state.user_info_logged = True
+                            
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"AI Connection Error: {e}")
+                    else:
+                        st.error("Fatal Error: No AI models could be loaded. Please check API Key.")
                 else:
                     st.error(txt["geo_error"])
 
