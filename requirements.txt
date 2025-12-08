@@ -4,3 +4,4 @@ ephem
 geopy
 gspread
 oauth2client
+groq
