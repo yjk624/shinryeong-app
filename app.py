@@ -14,7 +14,7 @@ import os
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
 
 # Robust Geocoding
-geolocator = Nominatim(user_agent="shinryeong_app_v9_master", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_app_v10_ultimate", timeout=10)
 
 # Initialize Groq
 try:
@@ -44,7 +44,7 @@ PROMPT_TEXT = load_text_file("prompt.txt")
 KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt")
 
 # ==========================================
-# 3. SMART LOCATION ENGINE
+# 3. HELPER FUNCTIONS
 # ==========================================
 CITY_DB = {
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
@@ -58,39 +58,26 @@ CITY_DB = {
     "창원": (35.22, 128.68), "Changwon": (35.22, 128.68),
     "수원": (37.26, 127.02), "Suwon": (37.26, 127.02),
     "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
+    "강릉": (37.75, 128.87), "Gangneung": (37.75, 128.87),
     "New York": (40.71, -74.00), "London": (51.50, -0.12),
     "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65)
 }
 
 def get_coordinates(city_input):
-    """
-    1. Check Internal DB (Instant match for major cities).
-    2. Check Substrings (Matches 'Changwon Hospital' to 'Changwon').
-    3. Use API (For 'Small Village in France').
-    """
-    clean_input = city_input.strip()
+    clean = city_input.strip()
+    if clean in CITY_DB: return CITY_DB[clean], clean
     
-    # 1. Exact DB Match
-    if clean_input in CITY_DB: return CITY_DB[clean_input], clean_input
-    
-    # 2. Smart Substring Match (Fixes specific hospital/district names)
     for city_key, coords in CITY_DB.items():
-        if city_key in clean_input or city_key.lower() in clean_input.lower():
+        if city_key in clean or city_key.lower() in clean.lower():
             return coords, city_key 
             
-    # 3. Real Geocoding API (Fallback for global locations)
     try:
-        loc = geolocator.geocode(clean_input)
-        if loc: 
-            return (loc.latitude, loc.longitude), clean_input
+        loc = geolocator.geocode(clean)
+        if loc: return (loc.latitude, loc.longitude), clean
     except:
         pass
-    
     return None, None
 
-# ==========================================
-# 4. DATABASE & AI ENGINE
-# ==========================================
 def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_lunar):
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -122,7 +109,7 @@ def generate_ai_response(messages):
         stream = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
-            temperature=0.7, # Higher creativity for metaphors
+            temperature=0.6,
             max_tokens=4000,
             top_p=1,
             stream=True,
@@ -137,7 +124,7 @@ def generate_ai_response(messages):
         return f"Error: {e}"
 
 # ==========================================
-# 5. UI LAYOUT
+# 4. UI LAYOUT
 # ==========================================
 TRANS = {
     "ko": {
@@ -151,11 +138,11 @@ TRANS = {
         """,
         "submit_btn": "🔮 신령에게 분석 요청하기",
         "loading": "⏳ 천문 데이터를 계산하고 신령을 소환하는 중...",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다. (구체적인 도시명으로 다시 시도해주세요).",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다. (도시명으로 다시 시도해주세요).",
         "chat_placeholder": "추가로 궁금한 점이 있으신가요? (예: 내년의 재물운은?)",
         "reset_btn": "🔄 새로운 분석 시작",
         "dob_label": "생년월일", "time_label": "태어난 시간", "gender_label": "성별",
-        "male": "남성", "female": "여성", "loc_label": "태어난 지역 (예: 창원, 서울 강남구, 뉴욕)",
+        "male": "남성", "female": "여성", "loc_label": "태어난 지역 (예: 창원, 서울)",
         "concern_label": "현재 가장 큰 고민은 무엇인가요?",
         "cal_label": "양력/음력 구분",
         "theory_header": "📚 분석 근거 (Technical Basis)"
@@ -171,11 +158,11 @@ TRANS = {
         """,
         "submit_btn": "🔮 Request Analysis",
         "loading": "⏳ Calculating celestial data...",
-        "geo_error": "⚠️ Location not found. Please try a major city.",
+        "geo_error": "⚠️ Location not found.",
         "chat_placeholder": "Follow-up questions?",
-        "reset_btn": "🔄 New Analysis",
+        "reset_btn": "🔄 Start New Analysis",
         "dob_label": "Date of Birth", "time_label": "Time of Birth", "gender_label": "Gender",
-        "male": "Male", "female": "Female", "loc_label": "Birth Place (e.g., New York, Seoul)",
+        "male": "Male", "female": "Female", "loc_label": "Birth Place (City)",
         "concern_label": "What is your main concern?",
         "cal_label": "Calendar Type",
         "theory_header": "📚 Technical Basis"
@@ -197,7 +184,7 @@ st.caption(txt["subtitle"])
 st.info(txt["warning"])
 
 # ==========================================
-# 6. MAIN LOGIC
+# 5. MAIN LOGIC
 # ==========================================
 if not st.session_state.saju_context:
     with st.form("input"):
@@ -218,49 +205,58 @@ if not st.session_state.saju_context:
         else:
             with st.spinner(txt["loading"]):
                 coords, matched_city = get_coordinates(loc_in)
-                
                 if coords:
                     lat, lon = coords
                     is_lunar = True if "음력" in cal_type else False
                     city_name = matched_city if matched_city else loc_in
                     
-                    # 1. CALCULATE MATH
+                    # 1. MATH
                     saju = calculate_saju_v3(b_date.year, b_date.month, b_date.day, 
                                            b_time.hour, b_time.minute, lat, lon, is_lunar)
                     saju['Birth_Place'] = city_name
                     saju['Gender'] = gender
                     
-                    # 2. HIGH-QUALITY PROMPT CONSTRUCTION
-                    # We inject the "Ideal Response" as a template.
+                    # 2. PROMPT WITH STRICT MARKDOWN TEMPLATE
                     system_prompt = f"""
                     [SYSTEM ROLE]
-                    You are 'Shinryeong'. You MUST speak in 'Hage-che' (하게체) - an authoritative but benevolent old sage.
+                    You are 'Shinryeong'. You speak in 'Hage-che' (하게체).
                     Language: {lang_code.upper()} Only.
-                    
-                    [STYLE GUIDE & EXAMPLE]
-                    Do NOT just list definitions like "Wood means growth."
-                    You must weave a narrative using nature metaphors.
-                    
-                    **GOOD OUTPUT EXAMPLE (Follow this style):**
-                    "1. 🔮 타고난 에너지 (기질 분석)
-                    년주(乙巳): 그대는 어린 시절부터 끈끈한 생명력(乙)과 활동적인 에너지(巳)를 타고났네. 마치 빽빽한 숲과 같은 성장 욕구가 있으나..."
                     
                     [KNOWLEDGE BASE]
                     {KNOWLEDGE_TEXT}
                     
-                    [USER DATA - DO NOT ASK FOR THIS AGAIN]
-                    - Saju: {saju['Year']} (Year), {saju['Month']} (Month), {saju['Day']} (Day), {saju['Time']} (Time)
+                    [USER DATA]
+                    - Saju: {saju['Year']}(Year), {saju['Month']}(Month), {saju['Day']}(Day), {saju['Time']}(Time)
                     - Gender: {gender}
-                    - Location: {city_name} (Lat: {lat}, Lon: {lon})
+                    - Location: {city_name}
+                    - Calendar: {cal_type}
                     - Concern: "{q}"
                     
-                    [REQUIRED OUTPUT FORMAT]
-                    1. 🔮 타고난 에너지 (기질 분석) - Use metaphors (Ocean, Fire, Mountain) based on the Pillars.
-                    2. ⚡ 현재의 흐름과 리스크 (운세 분석) - Address the user's specific concern.
-                    3. 🛡️ 신령의 처방 (Action Plan) - Give concrete advice.
+                    [STRICT MARKDOWN OUTPUT FORMAT]
+                    You MUST follow this exact structure. Do not change headers.
+                    
+                    ### 📜 신령의 분석 보고서
+                    
+                    **📋 사용자 데이터 확인**
+                    * **생년월일:** {b_date} ({cal_type})
+                    * **사주 명식:** {saju['Year']}년 {saju['Month']}월 {saju['Day']}일 {saju['Time']}시
+                    * **고민 내용:** "{q}"
+                    
+                    ---
+                    
+                    ### 1. 🔮 타고난 에너지 (기질 분석)
+                    (Analyze the 4 Pillars here using the Knowledge Base. Use **Bold** for key terms like **'Wood'** or **'Fire'**. Use metaphors like "Dense Forest" or "Big Ocean".)
+                    
+                    ### 2. ⚡ 현재의 흐름과 리스크 (운세 분석)
+                    (Analyze the user's specific concern based on the Saju structure.)
+                    
+                    ### 3. 🛡️ 신령의 처방 (Action Plan)
+                    * **행동 지침:** (Concrete advice)
+                    * **마음가짐:** (Mental attitude)
+                    * **개운 아이템:** (Lucky color/direction/item)
                     
                     [[TECHNICAL_SECTION]]
-                    (Explain the technical 'Ten Gods' or 'Shensha' logic here.)
+                    (Explain the technical 'Ten Gods' logic here.)
                     """
                     
                     st.session_state.saju_context = system_prompt
