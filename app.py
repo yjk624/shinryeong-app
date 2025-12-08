@@ -14,7 +14,7 @@ import json
 # Initialize Geocoder
 geolocator = Nominatim(user_agent="shinryeong_app_v2")
 
-# Configure Gemini API (from Secrets)
+# Configure Gemini API
 try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
@@ -25,34 +25,39 @@ except Exception as e:
 # ==========================================
 # 2. DATABASE FUNCTION (Google Sheets)
 # ==========================================
-def save_to_database(user_data, concern, analysis_summary):
-    """Saves user session data to Google Sheets securely."""
+def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
+    """Saves user inputs AND calculated data to Google Sheets."""
     try:
         # Define Scope
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         
-        # Load Credentials from Secrets
+        # Load Credentials
         creds_dict = dict(st.secrets["gcp_service_account"])
-        # Fix formatting for private key
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         
-        # Open Sheet (Make sure your sheet is named EXACTLY this)
+        # Open Sheet
         sheet = client.open("Shinryeong_User_Data").sheet1
         
-        # Prepare Row
+        # [NEW] Format the Gregorian Date/Time for the spreadsheet
+        input_date_str = birth_date_obj.strftime("%Y-%m-%d")
+        input_time_str = birth_time_obj.strftime("%H:%M")
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # [UPDATED] Row Structure: Timestamp | Input Date | Input Time | Location | Gender | Saju Year | Saju Month | Saju Day | Saju Time | Concern
         row = [
-            timestamp,
-            user_data.get('Year', ''),
-            user_data.get('Month', ''),
-            user_data.get('Day', ''),
-            user_data.get('Time', ''),
-            str(user_data.get('Birth_Place', 'Unknown')),
-            user_data.get('Gender', 'Unknown'),
-            concern
+            timestamp,                        # Col A: Log Time
+            input_date_str,                   # Col B: User Input Date (1990-05-05)
+            input_time_str,                   # Col C: User Input Time (12:30)
+            str(user_data.get('Birth_Place', 'Unknown')), # Col D: Location
+            user_data.get('Gender', 'Unknown'), # Col E: Gender
+            user_data.get('Year', ''),        # Col F: Saju Year (Gap-Ja)
+            user_data.get('Month', ''),       # Col G: Saju Month
+            user_data.get('Day', ''),         # Col H: Saju Day
+            user_data.get('Time', ''),        # Col I: Saju Time
+            concern                           # Col J: User Concern
         ]
         
         sheet.append_row(row)
@@ -141,7 +146,6 @@ with st.form("user_input"):
 
     user_question = st.text_area(txt["concern_label"], height=100, placeholder=txt["concern_placeholder"])
     
-    # This defines the variable 'submitted'
     submitted = st.form_submit_button(txt["submit_btn"])
 
 # ==========================================
@@ -190,10 +194,11 @@ if submitted:
                     # D. Call AI
                     response = model.generate_content(full_prompt)
                     
-                    # E. Save to Database (Silent Background Process)
+                    # E. [UPDATED] Save to Database with Input Date/Time
                     saju_data['Birth_Place'] = location_input
                     saju_data['Gender'] = gender
-                    save_to_database(saju_data, user_question, "Analysis Generated")
+                    # Pass the original date/time objects to the save function
+                    save_to_database(saju_data, birth_date, birth_time, user_question)
                     
                     # F. Display Results
                     if "[[TECHNICAL_SECTION]]" in response.text:
