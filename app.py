@@ -14,7 +14,7 @@ import os
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
 
 # Robust Geocoding
-geolocator = Nominatim(user_agent="shinryeong_app_v10_ultimate", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_app_global_v1", timeout=10)
 
 # Initialize Groq
 try:
@@ -44,9 +44,11 @@ PROMPT_TEXT = load_text_file("prompt.txt")
 KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt")
 
 # ==========================================
-# 3. HELPER FUNCTIONS
+# 3. GLOBAL CITY DATABASE (Professional Grade)
 # ==========================================
+# Expanded to cover major world hubs to ensure reliability.
 CITY_DB = {
+    # Korea
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
     "부산": (35.17, 129.07), "Busan": (35.17, 129.07),
     "인천": (37.45, 126.70), "Incheon": (37.45, 126.70),
@@ -59,18 +61,43 @@ CITY_DB = {
     "수원": (37.26, 127.02), "Suwon": (37.26, 127.02),
     "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
     "강릉": (37.75, 128.87), "Gangneung": (37.75, 128.87),
-    "New York": (40.71, -74.00), "London": (51.50, -0.12),
-    "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65)
+    # Asia
+    "Tokyo": (35.67, 139.65), "도쿄": (35.67, 139.65),
+    "Osaka": (34.69, 135.50), "오사카": (34.69, 135.50),
+    "Beijing": (39.90, 116.40), "베이징": (39.90, 116.40),
+    "Shanghai": (31.23, 121.47), "상하이": (31.23, 121.47),
+    "Hong Kong": (22.31, 114.16), "홍콩": (22.31, 114.16),
+    "Singapore": (1.35, 103.81), "싱가포르": (1.35, 103.81),
+    "Bangkok": (13.75, 100.50), "방콕": (13.75, 100.50),
+    "Hanoi": (21.02, 105.83), "하노이": (21.02, 105.83),
+    # North America
+    "New York": (40.71, -74.00), "뉴욕": (40.71, -74.00),
+    "Los Angeles": (34.05, -118.24), "LA": (34.05, -118.24),
+    "Chicago": (41.87, -87.62), "시카고": (41.87, -87.62),
+    "Toronto": (43.65, -79.38), "토론토": (43.65, -79.38),
+    "Vancouver": (49.28, -123.12), "밴쿠버": (49.28, -123.12),
+    # Europe
+    "London": (51.50, -0.12), "런던": (51.50, -0.12),
+    "Paris": (48.85, 2.35), "파리": (48.85, 2.35),
+    "Berlin": (52.52, 13.40), "베를린": (52.52, 13.40),
+    "Rome": (41.90, 12.49), "로마": (41.90, 12.49),
+    "Madrid": (40.41, -3.70), "마드리드": (40.41, -3.70),
+    "Moscow": (55.75, 37.61), "모스크바": (55.75, 37.61),
+    # Oceania
+    "Sydney": (-33.86, 151.20), "시드니": (-33.86, 151.20),
+    "Melbourne": (-37.81, 144.96), "멜버른": (-37.81, 144.96)
 }
 
 def get_coordinates(city_input):
     clean = city_input.strip()
     if clean in CITY_DB: return CITY_DB[clean], clean
     
+    # Substring match
     for city_key, coords in CITY_DB.items():
         if city_key in clean or city_key.lower() in clean.lower():
             return coords, city_key 
             
+    # Fallback to API
     try:
         loc = geolocator.geocode(clean)
         if loc: return (loc.latitude, loc.longitude), clean
@@ -78,6 +105,9 @@ def get_coordinates(city_input):
         pass
     return None, None
 
+# ==========================================
+# 4. DATABASE & AI ENGINE
+# ==========================================
 def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_lunar):
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -124,7 +154,7 @@ def generate_ai_response(messages):
         return f"Error: {e}"
 
 # ==========================================
-# 4. UI LAYOUT
+# 5. UI LAYOUT
 # ==========================================
 TRANS = {
     "ko": {
@@ -137,12 +167,12 @@ TRANS = {
         3. 본 분석 결과에 따른 사용자의 결정과 그 결과에 대한 책임은 전적으로 **사용자 본인**에게 있습니다.
         """,
         "submit_btn": "🔮 신령에게 분석 요청하기",
-        "loading": "⏳ 천문 데이터를 계산하고 신령을 소환하는 중...",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다. (도시명으로 다시 시도해주세요).",
+        "loading": "⏳ 전 세계의 천문 데이터를 수신하고 신령을 소환하는 중...",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다. 주요 도시명(예: 서울, 뉴욕)을 포함해 다시 시도해주세요.",
         "chat_placeholder": "추가로 궁금한 점이 있으신가요? (예: 내년의 재물운은?)",
         "reset_btn": "🔄 새로운 분석 시작",
         "dob_label": "생년월일", "time_label": "태어난 시간", "gender_label": "성별",
-        "male": "남성", "female": "여성", "loc_label": "태어난 지역 (예: 창원, 서울)",
+        "male": "남성", "female": "여성", "loc_label": "태어난 지역 (전 세계 도시 입력 가능)",
         "concern_label": "현재 가장 큰 고민은 무엇인가요?",
         "cal_label": "양력/음력 구분",
         "theory_header": "📚 분석 근거 (Technical Basis)"
@@ -158,11 +188,11 @@ TRANS = {
         """,
         "submit_btn": "🔮 Request Analysis",
         "loading": "⏳ Calculating celestial data...",
-        "geo_error": "⚠️ Location not found.",
+        "geo_error": "⚠️ Location not found. Please try a major city.",
         "chat_placeholder": "Follow-up questions?",
         "reset_btn": "🔄 Start New Analysis",
         "dob_label": "Date of Birth", "time_label": "Time of Birth", "gender_label": "Gender",
-        "male": "Male", "female": "Female", "loc_label": "Birth Place (City)",
+        "male": "Male", "female": "Female", "loc_label": "Birth Place (e.g., New York, Seoul)",
         "concern_label": "What is your main concern?",
         "cal_label": "Calendar Type",
         "theory_header": "📚 Technical Basis"
@@ -184,7 +214,7 @@ st.caption(txt["subtitle"])
 st.info(txt["warning"])
 
 # ==========================================
-# 5. MAIN LOGIC
+# 6. MAIN LOGIC
 # ==========================================
 if not st.session_state.saju_context:
     with st.form("input"):
@@ -195,7 +225,7 @@ if not st.session_state.saju_context:
             cal_type = st.radio(txt["cal_label"], ["양력 (Solar)", "음력 (Lunar)"])
         with col2:
             gender = st.radio(txt["gender_label"], [txt["male"], txt["female"]])
-            loc_in = st.text_input(txt["loc_label"], placeholder="Seoul, Busan...")
+            loc_in = st.text_input(txt["loc_label"], placeholder="Seoul, Tokyo, New York...")
         q = st.text_area(txt["concern_label"], height=100)
         submitted = st.form_submit_button(txt["submit_btn"])
 
@@ -205,6 +235,7 @@ if not st.session_state.saju_context:
         else:
             with st.spinner(txt["loading"]):
                 coords, matched_city = get_coordinates(loc_in)
+                
                 if coords:
                     lat, lon = coords
                     is_lunar = True if "음력" in cal_type else False
@@ -216,47 +247,62 @@ if not st.session_state.saju_context:
                     saju['Birth_Place'] = city_name
                     saju['Gender'] = gender
                     
-                    # 2. PROMPT WITH STRICT MARKDOWN TEMPLATE
+                    # 2. CSV FORMAT GENERATION
+                    csv_display = f"""
+                    | Parameter | Value |
+                    | :--- | :--- |
+                    | **Date** | {b_date} ({cal_type}) |
+                    | **Time** | {b_time} |
+                    | **Location** | {city_name} |
+                    | **Gender** | {gender} |
+                    | **Saju Pillars** | {saju['Year']} / {saju['Month']} / {saju['Day']} / {saju['Time']} |
+                    """
+                    
+                    # 3. ULTIMATE SYSTEM PROMPT
                     system_prompt = f"""
                     [SYSTEM ROLE]
-                    You are 'Shinryeong'. You speak in 'Hage-che' (하게체).
+                    You are 'Shinryeong' (신령). You MUST speak in 'Hage-che' (하게체) - like a wise old sage.
                     Language: {lang_code.upper()} Only.
                     
                     [KNOWLEDGE BASE]
                     {KNOWLEDGE_TEXT}
                     
                     [USER DATA]
-                    - Saju: {saju['Year']}(Year), {saju['Month']}(Month), {saju['Day']}(Day), {saju['Time']}(Time)
+                    - Saju: {saju}
                     - Gender: {gender}
-                    - Location: {city_name}
-                    - Calendar: {cal_type}
                     - Concern: "{q}"
                     
-                    [STRICT MARKDOWN OUTPUT FORMAT]
-                    You MUST follow this exact structure. Do not change headers.
+                    [MANDATORY OUTPUT STRUCTURE & STYLE]
+                    1. **Format:** You MUST start with the CSV-style table provided below.
+                    2. **Persona:** Do NOT be a robot. Be a sage. Use metaphors (Forest, Ocean, Sword).
+                    3. **Icons:** You MUST autonomously choose a relevant icon for every section header based on the content (e.g., 🌊 for Water year, ⚔️ for Metal day). Do not use the same icons every time.
+                    4. **Cold Reading (Accuracy Check):** You MUST include a section where you ask a "Confirming Question" based on the chart (e.g., "Did you have a major change in 2022?").
+                    
+                    [OUTPUT TEMPLATE - FOLLOW THIS]
                     
                     ### 📜 신령의 분석 보고서
                     
-                    **📋 사용자 데이터 확인**
-                    * **생년월일:** {b_date} ({cal_type})
-                    * **사주 명식:** {saju['Year']}년 {saju['Month']}월 {saju['Day']}일 {saju['Time']}시
-                    * **고민 내용:** "{q}"
+                    {csv_display}
                     
                     ---
                     
-                    ### 1. 🔮 타고난 에너지 (기질 분석)
-                    (Analyze the 4 Pillars here using the Knowledge Base. Use **Bold** for key terms like **'Wood'** or **'Fire'**. Use metaphors like "Dense Forest" or "Big Ocean".)
+                    ### [Icon] 1. 타고난 기질과 에너지
+                    (Analyze the pillars deeply. Connect them. e.g., "Your Water puts out the Fire...")
                     
-                    ### 2. ⚡ 현재의 흐름과 리스크 (운세 분석)
-                    (Analyze the user's specific concern based on the Saju structure.)
+                    ### [Icon] 2. 🔍 신령의 공명 (Accuracy Check)
+                    (Make a specific deduction about their past or personality. Ask: "Is this correct?")
                     
-                    ### 3. 🛡️ 신령의 처방 (Action Plan)
-                    * **행동 지침:** (Concrete advice)
-                    * **마음가짐:** (Mental attitude)
-                    * **개운 아이템:** (Lucky color/direction/item)
+                    ### [Icon] 3. ⚡ 현재의 흐름과 리스크
+                    (Address the user's concern directly.)
+                    
+                    ### [Icon] 4. 🛡️ 신령의 처방 (Action Plan)
+                    * **[Icon] 행동 지침:** ...
+                    * **[Icon] 마음가짐:** ...
+                    
+                    (Add more sections if necessary to be extensive.)
                     
                     [[TECHNICAL_SECTION]]
-                    (Explain the technical 'Ten Gods' logic here.)
+                    (Technical logic here.)
                     """
                     
                     st.session_state.saju_context = system_prompt
