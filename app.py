@@ -213,4 +213,17 @@ else:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input(txt["chat
+    if prompt := st.chat_input(txt["chat_placeholder"]):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("..."):
+                try:
+                    full_msg = f"[Context Reminder: {st.session_state.saju_context}]\nUser Question: {prompt}"
+                    response = st.session_state.chat_session.send_message(full_msg)
+                    st.markdown(response.text)
+                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                except Exception as e:
+                    st.error("Connection Error. Please try again.")
