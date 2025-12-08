@@ -6,16 +6,17 @@ import time as time_module
 from geopy.geocoders import Nominatim
 
 # ==========================================
-# 0. CONFIGURATION & CRITICAL STATE INITIALIZATION (FIX)
+# 0. CONFIGURATION & CRITICAL STATE INITIALIZATION (FIXED)
 # ==========================================
 st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
-# CRITICAL FIX: Ensure all keys exist before any code attempts to read them.
+# CRITICAL FIX: Initialize all keys safely at the top.
 if "lang" not in st.session_state: st.session_state.lang = "ko"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
-if "run_analysis" not in st.session_state: st.session_state.run_analysis = False # FIX: Ensure this key exists!
+if "run_analysis" not in st.session_state: st.session_state.run_analysis = False # State flag
+if "initialized" not in st.session_state: st.session_state.initialized = False
 
 # API Setup
 geolocator = Nominatim(user_agent="shinryeong_v10_final", timeout=10)
@@ -32,7 +33,7 @@ except Exception as e:
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.1 (최종 안정화)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.3 (최종 안정화)",
         "sidebar_title": "설정",
         "lang_btn": "English Mode",
         "reset_btn": "새로운 상담 시작",
@@ -49,7 +50,7 @@ UI_TEXT = {
     },
     "en": {
         "title": "🔮 Shinryeong Destiny Report",
-        "caption": "Authentic Saju Analysis System v10.1 (Final Stability)",
+        "caption": "Authentic Saju Analysis System v10.3 (Final Stability)",
         "sidebar_title": "Settings",
         "lang_btn": "한국어 모드",
         "reset_btn": "Reset Session",
@@ -67,7 +68,7 @@ UI_TEXT = {
 }
 
 # ==========================================
-# 2. CORE LOGIC ENGINE (v10.0 Retained)
+# 2. CORE LOGIC ENGINE (v10.3: Shinsal/Strength/Timeline)
 # ==========================================
 def get_coordinates(city_input):
     clean = city_input.strip()
@@ -84,14 +85,13 @@ def get_ganji_year(year):
 
 def analyze_heavy_logic(saju_data):
     """
-    [CRITICAL FIX: Season Weighted Score] Logic is retained.
+    Comprehensive analysis including all requested facts.
     """
     day_stem = saju_data['Day'][0]
     month_branch = saju_data['Month'][3]
     full_str = saju_data['Year'] + saju_data['Month'] + saju_data['Day'] + saju_data['Time']
     
-    # Mappings (Simplified)
-    identity_db = {'갑': "거목", '을': "화초", '병': "태양", '정': "촛불", '무': "태산", '기': "대지", '경': "바위", '신': "보석", '임': "바다", '계': "빗물"}
+    # 1. Strength Calculation
     season_elem_map = {'인': '목', '묘': '목', '진': '목', '사': '화', '오': '화', '미': '화', '신': '금', '유': '금', '술': '금', '해': '수', '자': '수', '축': '수'}
     day_elem_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
     my_elem = day_elem_map.get(day_stem, '토')
@@ -113,27 +113,35 @@ def analyze_heavy_logic(saju_data):
             
     strength_term = "신강(Strong - 주도적)" if score >= 40 else "신약(Weak - 환경 민감)"
     
-    # Shinsal (살) Injection
+    # 2. Hanja/Metaphor Mapping
+    identity_db = {'갑': "거목", '을': "화초", '병': "태양", '정': "촛불", '무': "태산", '기': "대지", '경': "바위", '신': "보석", '임': "바다", '계': "빗물"}
+    
+    # 3. Shinsal (살) Injection (All types)
     shinsal_list = []
     if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 활동성 강함, 이동과 변화")
     if any(x in full_str for x in ["자", "오", "묘", "유"]): shinsal_list.append("도화살(桃花煞): 인기를 끌고 주목받는 매력")
-    shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "평온한 기운"
+    if any(x in full_str for x in ["갑", "신", "묘", "오"]): shinsal_list.append("현침살(懸針煞): 예민한 감각, 정밀한 기술")
+    if "진" in full_str or "술" in full_str or "축" in full_str or "미" in full_str: shinsal_list.append("화개살(華蓋煞): 총명함, 예술성, 고독한 연구")
+    if ("진" in full_str and "술" in full_str): shinsal_list.append("괴강살(魁罡煞): 강력한 카리스마와 리더십")
+    if "인" in full_str and "사" in full_str and "신" in full_str: shinsal_list.append("삼형살(三刑煞): 갈등, 수술, 법적 리스크")
+    
+    shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "특별한 길흉 없이 평온한 기운"
 
-    # Future Trend (3 Years)
+    # 4. Future Trend (3 Years)
     current_year = datetime.now().year
     trend_text = []
     day_branch = saju_data['Day'][3]
     clashes = {"자":"오", "축":"미", "인":"신", "묘":"유", "진":"술", "사":"해", "오":"자", "미":"축", "신":"인", "유":"묘", "술":"진", "해":"사"}
-    
+
     for y in range(current_year, current_year+3):
         stem, branch = get_ganji_year(y)
         rel_msg = "안정 (Stability)"
         if clashes.get(day_branch) == branch: rel_msg = f"⚠️ 충(Clash) - 변화와 이동수"
         trend_text.append(f"- **{y}년({stem}{branch}년):** {rel_msg}")
 
-    # Lucky Color
+    # 5. Lucky Color
     weak_colors = {'목':'검은색(수)', '화':'초록색(목)', '토':'붉은색(화)', '금':'노란색(토)', '수':'흰색(금)'}
-    lucky_color = weak_colors.get(my_elem) if score < 40 else '흰색' 
+    lucky_color = weak_colors.get(my_elem) if score < 40 else '흰색'
     
     return {
         "metaphor": identity_db.get(day_stem, "기운"),
@@ -148,6 +156,7 @@ def generate_ai_response(messages, lang_mode):
     instruction = (
         "[CRITICAL INSTRUCTION]\n"
         f"Language: {lang_mode.upper()} ONLY.\n"
+        "If Korean: Use Titles: '1. 타고난 그릇', '2. 미래 흐름', '3. 신령의 처방'.\n"
         "Explain Chinese characters (Hanja) easily. Ensure detailed, multi-sentence response per section.\n"
     )
     if messages[0]['role'] == 'system':
@@ -170,14 +179,14 @@ def generate_ai_response(messages, lang_mode):
     return "⚠️ AI 연결 지연. 잠시 후 다시 시도해주세요."
 
 # ==========================================
-# 3. UI LAYOUT & MAIN ROUTER (RE-FIXED)
+# 3. UI LAYOUT & MAIN ROUTER (FIXED)
 # ==========================================
 with st.sidebar:
     t = UI_TEXT[st.session_state.lang]
     st.title(t["sidebar_title"])
     
-    # DIAGNOSTIC PANEL (FORCED VISIBILITY)
-    with st.expander("🛠️ System Diagnostic", expanded=True):
+    # DIAGNOSTIC PANEL 
+    with st.expander("🛠️ System Diagnostic", expanded=False):
         st.caption(f"Status: {'✅ Complete' if st.session_state.analysis_complete else '❌ Pending'}")
         st.caption(f"Msg Count: {len(st.session_state.messages)}")
         st.caption(f"Run Flag: {st.session_state.run_analysis}")
@@ -219,7 +228,7 @@ if not st.session_state.analysis_complete:
                                            time_val.hour, time_val.minute, coords[0], coords[1])
                     facts = analyze_heavy_logic(saju)
                     
-                    # 1. Prompt Setup (Store the full script)
+                    # 1. Prompt Setup
                     if st.session_state.lang == "ko":
                         titles = {"t1": "1. 🐅 타고난 그릇과 기질", "t2": "2. ☁️ 다가올 미래의 흐름과 리스크 (3년)", "t3": "3. ⚡ 신령의 처방 및 개운", "s1": "행동", "s2": "마인드셋", "s3": "개운법"}
                     else:
@@ -268,12 +277,12 @@ else:
             
             # Save message and update state
             if full_resp.startswith("⚠️ AI 연결 지연"):
-                 st.session_state.messages.append({"role": "assistant", "content": full_resp})
+                st.session_state.messages.append({"role": "assistant", "content": full_resp})
             else:
                 st.session_state.messages.append({"role": "assistant", "content": full_resp})
                 
             # Transition state to display history cleanly
-            st.rerun() # This final rerun should clear the spinner and display the message via the history loop
+            st.rerun() 
 
 
     # 2. Display History
