@@ -3,19 +3,15 @@ import math
 from datetime import datetime, timedelta
 from korean_lunar_calendar import KoreanLunarCalendar
 
-# === CONSTANTS (KOREAN VER.) ===
-# Changed from "Gap (甲)" to "갑(甲)" for native readability
+# === CONSTANTS (PURE KOREAN + HANJA) ===
 GAN = ["갑(甲)", "을(乙)", "병(丙)", "정(丁)", "무(戊)", "기(己)", "경(庚)", "신(辛)", "임(壬)", "계(癸)"]
 JI = ["자(子)", "축(丑)", "인(寅)", "묘(卯)", "진(辰)", "사(巳)", "오(午)", "미(未)", "신(申)", "유(酉)", "술(戌)", "해(亥)"]
 
 def get_ganji(index):
+    # Returns purely "갑(甲)자(子)" format without hyphens or English
     return f"{GAN[index % 10]}{JI[index % 12]}"
 
 def calculate_saju_v3(year, month, day, hour, minute, lat, lon, is_lunar=False):
-    """
-    Calculates the Four Pillars (Saju) with Lunar conversion support.
-    """
-    
     # 1. Lunar -> Solar Conversion
     if is_lunar:
         calendar = KoreanLunarCalendar()
