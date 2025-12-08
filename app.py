@@ -74,7 +74,7 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern):
 TRANS = {
     "ko": {
         "title": "🔮 신령 (Shinryeong)",
-        "subtitle": "AI 형이상학 분석가 (대화형 모드)",
+        "subtitle": "AI 형이상학 분석가 (특정 주제 분석/상담)",
         "warning": "💡 **알림:** 본 분석 결과는 명리학적 데이터에 기반한 참고용 자료입니다.",
         "dob_label": "생년월일",
         "time_label": "태어난 시간",
