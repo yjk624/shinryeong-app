@@ -13,8 +13,8 @@ import os
 # ==========================================
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
 
-# Robust Geocoding with Unique User Agent
-geolocator = Nominatim(user_agent="shinryeong_app_v8_final_pro", timeout=10)
+# Robust Geocoding
+geolocator = Nominatim(user_agent="shinryeong_app_v9_master", timeout=10)
 
 # Initialize Groq
 try:
@@ -58,34 +58,34 @@ CITY_DB = {
     "창원": (35.22, 128.68), "Changwon": (35.22, 128.68),
     "수원": (37.26, 127.02), "Suwon": (37.26, 127.02),
     "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
-    "강릉": (37.75, 128.87), "Gangneung": (37.75, 128.87),
     "New York": (40.71, -74.00), "London": (51.50, -0.12),
     "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65)
 }
 
 def get_coordinates(city_input):
     """
-    Smart Logic:
-    1. Try Exact Geocoding (Best accuracy).
-    2. If fails, check if input *contains* a major city name (e.g. "Changwon Hospital" -> Match "Changwon").
-    3. Return fallback if nothing found.
+    1. Check Internal DB (Instant match for major cities).
+    2. Check Substrings (Matches 'Changwon Hospital' to 'Changwon').
+    3. Use API (For 'Small Village in France').
     """
     clean_input = city_input.strip()
     
-    # 1. Try Exact API Call
+    # 1. Exact DB Match
+    if clean_input in CITY_DB: return CITY_DB[clean_input], clean_input
+    
+    # 2. Smart Substring Match (Fixes specific hospital/district names)
+    for city_key, coords in CITY_DB.items():
+        if city_key in clean_input or city_key.lower() in clean_input.lower():
+            return coords, city_key 
+            
+    # 3. Real Geocoding API (Fallback for global locations)
     try:
         loc = geolocator.geocode(clean_input)
         if loc: 
             return (loc.latitude, loc.longitude), clean_input
     except:
-        pass # If API blocks/fails, fall through to smart match
+        pass
     
-    # 2. Smart Substring Match (The Fix for "Changwon Fatima Hospital")
-    # We check if any key in our DB exists inside the user's input string.
-    for city_key, coords in CITY_DB.items():
-        if city_key in clean_input or city_key.lower() in clean_input.lower():
-            return coords, city_key # Return the matched major city coords
-            
     return None, None
 
 # ==========================================
@@ -122,8 +122,8 @@ def generate_ai_response(messages):
         stream = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
-            temperature=0.5,
-            max_tokens=3500,
+            temperature=0.7, # Higher creativity for metaphors
+            max_tokens=4000,
             top_p=1,
             stream=True,
             stop=None,
@@ -150,12 +150,12 @@ TRANS = {
         3. 본 분석 결과에 따른 사용자의 결정과 그 결과에 대한 책임은 전적으로 **사용자 본인**에게 있습니다.
         """,
         "submit_btn": "🔮 신령에게 분석 요청하기",
-        "loading": "⏳ 위성 좌표를 수신하고 신령을 소환하는 중...",
-        "geo_error": "⚠️ 위치를 확인할 수 없습니다. 도시 이름을 정확히 입력해주세요.",
+        "loading": "⏳ 천문 데이터를 계산하고 신령을 소환하는 중...",
+        "geo_error": "⚠️ 위치를 찾을 수 없습니다. (구체적인 도시명으로 다시 시도해주세요).",
         "chat_placeholder": "추가로 궁금한 점이 있으신가요? (예: 내년의 재물운은?)",
         "reset_btn": "🔄 새로운 분석 시작",
         "dob_label": "생년월일", "time_label": "태어난 시간", "gender_label": "성별",
-        "male": "남성", "female": "여성", "loc_label": "태어난 장소 (예: 창원 파티마병원, 서울 강남구)",
+        "male": "남성", "female": "여성", "loc_label": "태어난 지역 (예: 창원, 서울 강남구, 뉴욕)",
         "concern_label": "현재 가장 큰 고민은 무엇인가요?",
         "cal_label": "양력/음력 구분",
         "theory_header": "📚 분석 근거 (Technical Basis)"
@@ -170,8 +170,8 @@ TRANS = {
         3. The user bears full responsibility for any decisions made based on this analysis.
         """,
         "submit_btn": "🔮 Request Analysis",
-        "loading": "⏳ Geocoding location and calculating destiny...",
-        "geo_error": "⚠️ Location not found.",
+        "loading": "⏳ Calculating celestial data...",
+        "geo_error": "⚠️ Location not found. Please try a major city.",
         "chat_placeholder": "Follow-up questions?",
         "reset_btn": "🔄 New Analysis",
         "dob_label": "Date of Birth", "time_label": "Time of Birth", "gender_label": "Gender",
@@ -217,25 +217,33 @@ if not st.session_state.saju_context:
             st.error(txt["geo_error"])
         else:
             with st.spinner(txt["loading"]):
-                # 1. SMART GEOCODING
-                coords, matched_city_name = get_coordinates(loc_in)
+                coords, matched_city = get_coordinates(loc_in)
                 
                 if coords:
                     lat, lon = coords
                     is_lunar = True if "음력" in cal_type else False
+                    city_name = matched_city if matched_city else loc_in
                     
-                    # 2. CALCULATE MATH
+                    # 1. CALCULATE MATH
                     saju = calculate_saju_v3(b_date.year, b_date.month, b_date.day, 
                                            b_time.hour, b_time.minute, lat, lon, is_lunar)
-                    saju['Birth_Place'] = matched_city_name # Store the clean name (e.g. "Changwon")
+                    saju['Birth_Place'] = city_name
                     saju['Gender'] = gender
                     
-                    # 3. HIGH-FIDELITY PROMPT CONSTRUCTION
-                    # We paste the "Ideal Response Structure" directly into the instruction.
+                    # 2. HIGH-QUALITY PROMPT CONSTRUCTION
+                    # We inject the "Ideal Response" as a template.
                     system_prompt = f"""
                     [SYSTEM ROLE]
-                    You are 'Shinryeong'. You MUST speak in 'Hage-che' (하게체).
+                    You are 'Shinryeong'. You MUST speak in 'Hage-che' (하게체) - an authoritative but benevolent old sage.
                     Language: {lang_code.upper()} Only.
+                    
+                    [STYLE GUIDE & EXAMPLE]
+                    Do NOT just list definitions like "Wood means growth."
+                    You must weave a narrative using nature metaphors.
+                    
+                    **GOOD OUTPUT EXAMPLE (Follow this style):**
+                    "1. 🔮 타고난 에너지 (기질 분석)
+                    년주(乙巳): 그대는 어린 시절부터 끈끈한 생명력(乙)과 활동적인 에너지(巳)를 타고났네. 마치 빽빽한 숲과 같은 성장 욕구가 있으나..."
                     
                     [KNOWLEDGE BASE]
                     {KNOWLEDGE_TEXT}
@@ -243,26 +251,16 @@ if not st.session_state.saju_context:
                     [USER DATA - DO NOT ASK FOR THIS AGAIN]
                     - Saju: {saju['Year']} (Year), {saju['Month']} (Month), {saju['Day']} (Day), {saju['Time']} (Time)
                     - Gender: {gender}
-                    - Location: {matched_city_name} (Lat: {lat}, Lon: {lon})
+                    - Location: {city_name} (Lat: {lat}, Lon: {lon})
                     - Concern: "{q}"
                     
                     [REQUIRED OUTPUT FORMAT]
-                    You must follow this EXACT structure. Use emojis.
-                    
-                    1. 🔮 타고난 에너지 (기질 분석)
-                       - Explain the 4 Pillars (Year/Month/Day/Time) using nature metaphors.
-                       - Use the specific Ganji chars (e.g., 甲, 寅) provided in User Data.
-                    
-                    2. ⚡ 현재의 흐름과 리스크 (운세 분석)
-                       - Analyze the current situation based on the user's concern.
-                    
-                    3. 🛡️ 신령의 처방 (Action Plan)
-                       - 행동 지침 (Action Guide)
-                       - 마음가짐 (Mindset)
-                       - 개운 아이템 (Lucky Item/Color/Direction)
+                    1. 🔮 타고난 에너지 (기질 분석) - Use metaphors (Ocean, Fire, Mountain) based on the Pillars.
+                    2. ⚡ 현재의 흐름과 리스크 (운세 분석) - Address the user's specific concern.
+                    3. 🛡️ 신령의 처방 (Action Plan) - Give concrete advice.
                     
                     [[TECHNICAL_SECTION]]
-                    (Here, explain the technical 'Ten Gods' or 'Shensha' logic used above.)
+                    (Explain the technical 'Ten Gods' or 'Shensha' logic here.)
                     """
                     
                     st.session_state.saju_context = system_prompt
@@ -304,7 +302,6 @@ else:
         st.session_state.messages.append({"role": "user", "content": p})
         with st.chat_message("user"): st.markdown(p)
         
-        # Keep the "Persona" alive in follow-up chat
         msgs = [{"role": "system", "content": st.session_state.saju_context}]
         for m in st.session_state.messages:
             msgs.append({"role": m["role"], "content": m["content"]})
