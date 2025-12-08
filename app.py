@@ -19,10 +19,14 @@ try:
     API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=API_KEY)
     
-    # [FIX] Switched to 'models/gemini-flash-latest'
-    # This worked for you previously and has the high 1,500/day free limit.
-    model = genai.GenerativeModel('models/gemini-flash-latest')
-    
+    # [FIX] We use the specific version '001'.
+    # This prevents the system from auto-upgrading to the limited 2.5 version.
+    # If this fails, we fall back to 'gemini-pro'.
+    try:
+        model = genai.GenerativeModel('models/gemini-1.5-flash-001')
+    except:
+        model = genai.GenerativeModel('models/gemini-pro')
+        
 except Exception as e:
     st.error(f"Secret Error: {e}")
 
@@ -139,7 +143,7 @@ st.caption(txt["subtitle"])
 st.info(txt["warning"])
 
 # ==========================================
-# 5. INPUT FORM (SHOWN ONLY IF NO CHAT STARTED)
+# 5. INPUT FORM
 # ==========================================
 if not st.session_state.saju_context:
     with st.form("user_input"):
