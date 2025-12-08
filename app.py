@@ -1,97 +1,64 @@
+%%writefile app.py
 import streamlit as st
 import google.generativeai as genai
 from saju_engine import calculate_saju_v3
 from datetime import datetime, time
 from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import json
 
 # === CONFIGURATION ===
-API_KEY = st.secrets["GEMINI_API_KEY"]
-
+# Access API Key from Secrets
+API_KEY = st.secrets["GEMINI_API_KEY"] # Assuming you set this in secrets too
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('models/gemini-flash-latest')
 
-# Initialize Geocoder (Free Service via OpenStreetMap)
+# Initialize Geocoder
 geolocator = Nominatim(user_agent="shinryeong_app_v2")
 
-# === LANGUAGE DICTIONARY ===
-TRANS = {
-    "ko": {
-        "title": "🔮 신령 (Shinryeong)",
-        "subtitle": "AI 형이상학 분석가",
-        "warning": "💡 **알림:** 본 분석 결과는 명리학적 데이터에 기반한 참고용 자료입니다. 인생의 중요한 결정은 본인의 의지에 달려 있음을 기억해 주세요.",
-        "dob_label": "생년월일",
-        "time_label": "태어난 시간 (정확한 분 단위)",
-        "gender_label": "성별",
-        "male": "남성",
-        "female": "여성",
-        "loc_label": "태어난 장소 (전 세계 어디든 입력 가능)",
-        "loc_placeholder": "예: 서울 강남구, 뉴욕, 파리, 도쿄...",
-        "concern_label": "당신의 고민을 털어놓으시오",
-        "concern_placeholder": "예: 재물운이 언제쯤 트일까요?",
-        "submit_btn": "🔮 신령에게 분석 요청하기",
-        "loading": "⏳ 위성 좌표를 수신하고 운명을 계산하는 중...",
-        "result_header": "### 📜 신령의 분석 보고서",
-        "geo_error": "⚠️ 위치를 찾을 수 없습니다. 도시 이름을 정확히 입력해주세요 (예: Seoul, Korea).",
-        "ref_expander": "📚 분석 근거 및 기술적 이론 (Technical Basis)",
-        "ref_intro": "신령의 분석은 다음의 명리학적/자미두수 이론에 근거하여 도출되었습니다:",
-        "error_connect": "오류 발생: "
-    },
-    "en": {
-        "title": "🔮 Shinryeong",
-        "subtitle": "AI Metaphysical Analyst",
-        "warning": "💡 **Notice:** This analysis is based on metaphysical data. Please use it for reference only; the final choice is always yours.",
-        "dob_label": "Date of Birth",
-        "time_label": "Time of Birth",
-        "gender_label": "Gender",
-        "male": "Male",
-        "female": "Female",
-        "loc_label": "Place of Birth (City, Country)",
-        "loc_placeholder": "Ex: Seoul, New York, Paris, London...",
-        "concern_label": "What is your concern?",
-        "concern_placeholder": "Ex: When will my financial luck improve?",
-        "submit_btn": "🔮 Ask Shinryeong",
-        "loading": "⏳ Geocoding coordinates and calculating destiny...",
-        "result_header": "### 📜 Analyst Report",
-        "geo_error": "⚠️ Could not find location. Please try 'City, Country' format.",
-        "ref_expander": "📚 Technical Theory & Basis",
-        "ref_intro": "This report was derived using the following metaphysical theories:",
-        "error_connect": "Error: "
-    }
-}
+# === DATABASE CONNECTION (Google Sheets) ===
+def save_to_database(user_data, concern, analysis_summary):
+    try:
+        # Create a scope
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+        
+        # Load credentials from Streamlit Secrets
+        # We reconstruct the JSON dictionary from the secrets object
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        # Fix private key formatting if necessary (Streamlit sometimes messes up newlines)
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        
+        # Open the Sheet
+        sheet = client.open("Shinryeong_User_Data").sheet1
+        
+        # Prepare the Row Data
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = [
+            timestamp,
+            user_data['Year'],   # Saju Year
+            user_data['Month'],  # Saju Month
+            user_data['Day'],    # Saju Day
+            user_data['Time'],   # Saju Time
+            str(user_data.get('Birth_Place', 'Unknown')),
+            user_data.get('Gender', 'Unknown'),
+            concern,             # The user's worry
+            # Note: We do NOT save PII (Name/IP) to respect Volume 6 
+        ]
+        
+        # Append to Sheet
+        sheet.append_row(row)
+        return True
+    except Exception as e:
+        # Fail silently so the user experience isn't broken
+        print(f"Database Error: {e}")
+        return False
 
-# === UI LAYOUT ===
-st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
-
-# Sidebar Language Toggle
-with st.sidebar:
-    st.header("Settings")
-    lang_choice = st.radio("Language / 언어", ["한국어", "English"])
-    lang_code = "ko" if lang_choice == "한국어" else "en"
-    txt = TRANS[lang_code]
-
-# Main UI
-st.title(txt["title"])
-st.subheader(txt["subtitle"])
-st.markdown("---")
-st.info(txt["warning"])
-
-# === INPUT FORM ===
-with st.form("user_input"):
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        birth_date = st.date_input(txt["dob_label"], min_value=datetime(1940, 1, 1))
-        birth_time = st.time_input(txt["time_label"], value=time(12, 00), step=60)
-    
-    with col2:
-        gender = st.radio(txt["gender_label"], [txt["male"], txt["female"]])
-        # Free Text Input for Location
-        location_input = st.text_input(txt["loc_label"], placeholder=txt["loc_placeholder"])
-
-    user_question = st.text_area(txt["concern_label"], height=100, placeholder=txt["concern_placeholder"])
-    
-    submitted = st.form_submit_button(txt["submit_btn"])
+# ... [KEEP YOUR EXISTING LANGUAGE DICTIONARY & UI CODE HERE] ...
+# ... (No changes needed to TRANS or UI LAYOUT until the Submit button) ...
 
 # === LOGIC CORE ===
 if submitted:
@@ -100,7 +67,7 @@ if submitted:
     else:
         with st.spinner(txt["loading"]):
             try:
-                # 1. Geocoding (Text -> Lat/Lon)
+                # 1. Geocoding
                 location = geolocator.geocode(location_input, timeout=10)
                 
                 if location:
@@ -113,52 +80,25 @@ if submitted:
                         birth_time.hour, birth_time.minute, lat, lon
                     )
                     
-                    # 3. Construct Prompt with SEPARATOR Logic
-                    target_output_lang = "Korean" if lang_code == "ko" else "English"
-                    
-                    full_prompt = f"""
-                    [System Command: You are 'Shinryeong'.]
-                    [CRITICAL RULE: SEPARATE OUTPUT]
-                    1. First, write the main counseling report in {target_output_lang}. Use Hage-che tone (if Korean). Use Easy Modern Terms.
-                    2. Then, type exactly "[[TECHNICAL_SECTION]]".
-                    3. After that marker, explain the **Technical Saju Theories** used (e.g., "Used 'Clash of Rat and Horse' to predict stress", "Applied 'Ten Gods' logic"). 
-                       - Do NOT mention "Volume 4". 
-                       - Explain the logic so the user understands the 'Why'.
-                       - Write this technical part in {target_output_lang} too.
-
-                    USER DATA:
-                    {saju_data}
-                    - Birth Place: {location_input} ({lat}, {lon})
-                    
-                    USER CONCERN:
-                    "{user_question}"
-                    """
+                    # 3. Construct Prompt (Your existing code)
+                    # ... [KEEP YOUR PROMPT CONSTRUCTION HERE] ...
                     
                     # 4. Call AI
                     response = model.generate_content(full_prompt)
                     
-                    # 5. Split Response (Main vs Theory)
-                    if "[[TECHNICAL_SECTION]]" in response.text:
-                        parts = response.text.split("[[TECHNICAL_SECTION]]")
-                        main_report = parts[0]
-                        theory_report = parts[1]
-                    else:
-                        main_report = response.text
-                        theory_report = "Technical details were integrated into the main text."
-
-                    # 6. Display Main Report
-                    st.markdown(txt["result_header"])
-                    st.markdown(main_report)
+                    # 5. [NEW] SAVE DATA TO DATABASE
+                    # We add 'Birth_Place' and 'Gender' to saju_data for logging
+                    saju_data['Birth_Place'] = location_input
+                    saju_data['Gender'] = gender
                     
-                    # 7. Display Theory in Expander (Matching Language)
-                    with st.expander(txt["ref_expander"]):
-                        st.write(txt["ref_intro"])
-                        st.markdown(theory_report)
-                        st.caption(f"📍 Calculated based on coordinates: {lat:.2f}, {lon:.2f} ({location.address})")
+                    # Run the save function in the background
+                    save_to_database(saju_data, user_question, "Analysis Generated")
+
+                    # 6. Display Result (Your existing code)
+                    # ... [KEEP YOUR DISPLAY CODE HERE] ...
 
                 else:
                     st.error(txt["geo_error"])
                     
             except Exception as e:
                 st.error(f"{txt['error_connect']}{e}")
-            
