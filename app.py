@@ -9,16 +9,16 @@ from korean_lunar_calendar import KoreanLunarCalendar
 import json
 
 # ==========================================
-# 0. CONFIG & TEXTS
+# 0. CONFIG & TEXTS (Defined First)
 # ==========================================
 st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v15.1 (최종 완성)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v16.0 (Perfect Fixed)",
         "sidebar_title": "설정", "lang_btn": "English Mode", "reset_btn": "새로운 상담 시작",
-        "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시 (예: 서울, 부산)",
+        "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시",
         "input_gender": "성별", "concern_label": "당신의 고민을 구체적으로 적어주세요.",
         "submit_btn": "📜 정밀 분석 시작", "loading": "천문 데이터 계산 및 신강/신약 정밀 판별 중...",
         "warn_title": "법적 면책 조항", "warn_text": "본 분석은 통계적 참고자료입니다.",
@@ -35,7 +35,7 @@ if "saju_data_dict" not in st.session_state: st.session_state.saju_data_dict = {
 if "raw_input_data" not in st.session_state: st.session_state.raw_input_data = None
 
 # API Setup
-geolocator = Nominatim(user_agent="shinryeong_v15_1_final", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_v16_final", timeout=10)
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -60,21 +60,6 @@ def get_coordinates(city_input):
         loc = geolocator.geocode(city_input)
         if loc: return (loc.latitude, loc.longitude), city_input
     except: pass
-    
-    if city_input and any(c.isalpha() for c in city_input):
-        try:
-            approx_loc = geolocator.geocode(city_input + ", South Korea", timeout=3)
-            if approx_loc:
-                min_dist = float('inf')
-                nearest_coords = None
-                input_pt = (approx_loc.latitude, approx_loc.longitude)
-                for coords in CITY_DB.values():
-                    dist = great_circle(input_pt, coords).km
-                    if dist < min_dist:
-                        min_dist = dist
-                        nearest_coords = coords
-                if min_dist < 50: return nearest_coords, f"{city_input} (Nearest)"
-        except: pass
     return None, None
 
 def convert_lunar_to_solar(year, month, day, is_intercalary):
@@ -85,14 +70,14 @@ def convert_lunar_to_solar(year, month, day, is_intercalary):
     except: return None
 
 # ==========================================
-# 2. LOGIC ENGINE (Direct from Saju Engine)
+# 2. LOGIC ENGINE (Narrative Generation)
 # ==========================================
-def analyze_heavy_logic(saju_res):
+def analyze_logic_v16(saju_res):
     """
-    Directly analyzes the Korean output from saju_engine.py
+    Constructs the NARRATIVE directly in Python to prevent AI hallucination.
     """
-    dm = saju_res['Day_Stem'] # 일간
-    season = saju_res['Month_Branch'] # 월지
+    dm = saju_res['Day_Stem']
+    season = saju_res['Month_Branch']
     full_str = saju_res['Full_String']
     
     # 1. Elements
@@ -110,11 +95,10 @@ def analyze_heavy_logic(saju_res):
     elif my_elem == '금': supporters = ['토', '금']
     elif my_elem == '수': supporters = ['금', '수']
     
-    # 3. Strength Calculation
+    # 3. Strength Scoring (Rigorous)
     score = 0
-    # Season Check (+50 / -50)
     if season_elem in supporters: score += 50
-    else: score -= 50 # Penalize for Sil-ryeong (e.g. Water born in Fire month)
+    else: score -= 50 # Penalize for Sil-ryeong
     
     # Pillar Check
     for char in full_str:
@@ -124,16 +108,17 @@ def analyze_heavy_logic(saju_res):
         elif char in "병정사오": ce = '화'
         elif char in "경신신유": ce = '금'
         elif char in "임계해자": ce = '수'
-        
         if ce in supporters: score += 10
         else: score -= 5
             
-    if score >= 10: 
-        strength = "신강(Strong - 주도적)" 
-        advice_base = "자신의 에너지를 밖으로 표출하고 리드해야 운이 풀림."
+    # Diagnosis Narrative
+    strength_desc = ""
+    if score >= 20: 
+        strength = "신강(Strong)" 
+        strength_desc = "그대는 뚝심 있고 주관이 뚜렷하여, 남의 말에 휘둘리기보다 자신이 상황을 리드하는 힘을 타고났네."
     else: 
-        strength = "신약(Sensitive - 섬세함)"
-        advice_base = "환경에 민감하므로, 좋은 사람(귀인)을 곁에 두고 실리를 챙겨야 함."
+        strength = "신약(Sensitive)"
+        strength_desc = "그대는 환경에 민감하고 섬세하여, 주변의 기운을 잘 읽어내나 그만큼 에너지 소모가 빠른 편이네."
 
     # 4. Pattern Detection (Jae-da-sin-yak)
     wealth_map = {'목':'토', '화':'금', '토':'수', '금':'목', '수':'화'}
@@ -149,38 +134,57 @@ def analyze_heavy_logic(saju_res):
         if ce == my_wealth: wealth_count += 1
         
     pattern = "일반격"
+    advice_core = "오행의 균형을 맞추는 것이 중요하네. 
+
+[Image of Five Elements Cycle]
+"
+    
     if "신약" in strength and wealth_count >= 3:
-        pattern = "재다신약(財多身弱)"
-        advice_base = "재물 욕심은 많으나 쥘 힘이 부족함. 돈을 쫓으면 건강을 잃으니, 공부(자격증)나 사람(인맥)을 먼저 얻어야 돈이 따라옴."
+        pattern = "재다신약(財多身弱 - 재물은 많으나 가질 힘이 약함)"
+        strength = "극신약(Very Weak)"
+        strength_desc = "그대는 재물과 기회(돈/여자/일) 속에 둘러싸여 있으나, 정작 그것을 쥘 힘이 부족해 건강을 잃거나 스트레스를 받는 형국이네."
+        advice_core = "돈을 쫓지 말고, **'자신을 채우는 공부(인성)'**나 **'믿을만한 동료(비겁)'**와 함께해야 재물이 내 것이 되네. 혼자 다 하려 하지 말게."
     elif wealth_count >= 3:
         pattern = "재성과다(Wealth Overload)"
+        advice_core = "타고난 사업가 기질이 있으나, 재물 관리에 신중해야 하네."
 
-    # 5. Metaphor
+    # 5. Metaphor Narrative
     metaphor_db = {
-        '갑': "거목(Pioneer)", '을': "화초(Survivor)", '병': "태양(Visionary)", '정': "촛불(Mentor)",
-        '무': "태산(Guardian)", '기': "대지(Cultivator)", '경': "바위(Warrior)", '신': "보석(Specialist)",
-        '임': "바다(Strategist)", '계': "봄비(Intuitive)"
+        '갑': "곧게 뻗은 거목", '을': "끈질긴 생명력의 화초", '병': "만물을 비추는 태양", '정': "어둠을 밝히는 촛불",
+        '무': "묵직한 태산", '기': "비옥한 대지", '경': "단단한 바위", '신': "예리한 보석",
+        '임': "깊고 넓은 바다", '계': "스며드는 봄비"
     }
+    metaphor_text = f"그대는 자연으로 치면 **'{metaphor_db.get(dm, '알 수 없는 기운')}'**와 같네."
     
-    # 6. Shinsal
-    shinsal = ", ".join(saju_res['Shinsal']) if saju_res['Shinsal'] else "평온함"
+    # 6. Shinsal Narrative
+    shinsal_list = saju_res['Shinsal']
+    shinsal_text = "특별한 살은 보이지 않으나, 평온함이 장점이라네."
+    if shinsal_list:
+        shinsal_text = f"그대에게는 **{', '.join(shinsal_list)}**의 기운이 흐르고 있네. 이는 남들과 다른 특별한 무기가 될 수 있지."
 
     return {
-        "identity": dm, "metaphor": metaphor_db.get(dm, "기운"),
-        "strength": strength, "pattern": pattern, "advice": advice_base,
-        "shinsal": shinsal, "pillars": full_str,
-        "wealth_count": wealth_count
+        "identity": dm,
+        "metaphor_narrative": metaphor_text,
+        "strength_narrative": f"분석 결과, 그대의 기운은 **'{strength}'**이라네. {strength_desc}",
+        "pattern_narrative": f"격국은 **'{pattern}'**에 해당하네.",
+        "advice_narrative": advice_core,
+        "shinsal_narrative": shinsal_text,
+        "raw_pattern": pattern, # For Chat Logic
+        "pillars": full_str
     }
 
 def generate_ai_response(messages, mode="report"):
-    # [FIXED] Updated signature to accept 'mode' and removed 'lang_mode'
-    # [FIXED] Removed Image Generation Instructions
-    
+    # STRICT Persona & Language Lock
     sys_instruction = """
-[CRITICAL RULE] You are 'Shinryeong' (Divine Guru). Tone: Hage-che (하게체: ~하네, ~이라네).
-Language: KOREAN ONLY. No English/German words in output.
-Format: Use the provided JSON data to answer. Do not hallucinate generic advice.
-Task: Write a detailed report. Explain terms like '신강', '재다신약', '도화살' simply.
+[CRITICAL RULE]
+1. Role: 'Shinryeong' (Divine Guru). Tone: Hage-che (하게체: ~하네, ~이라네).
+2. Language: KOREAN ONLY. Absolutely NO Chinese characters (except in brackets) or English words in the final output text.
+3. Source: Use the provided [NARRATIVE DATA]. Do NOT calculate or invent new facts.
+4. If the data says 'Jae-da-sin-yak', DO NOT say 'You are strong'. Say "You are surrounded by wealth but need strength to hold it."
+5. Visuals: Insert 
+
+[Image of Five Elements Cycle]
+ exactly once.
 """
     if mode == "chat":
         sys_instruction += "\n[CHAT MODE] Answer ONLY the user's specific question using the data. Do NOT repeat the birth chart or introduction."
@@ -192,11 +196,11 @@ Task: Write a detailed report. Explain terms like '신강', '재다신약', '도
     for model in models:
         try:
             stream = client.chat.completions.create(
-                model=model, messages=messages, temperature=0.5, max_tokens=3500
+                model=model, messages=messages, temperature=0.5, max_tokens=4000
             )
             return stream.choices[0].message.content
         except: time_module.sleep(0.5); continue
-    return "⚠️ 신령이 응답하지 못했습니다."
+    return "⚠️ 신령이 깊은 명상에 잠겨 응답하지 못했습니다. 다시 시도해주게."
 
 # ==========================================
 # 3. MAIN UI FLOW
@@ -212,7 +216,7 @@ with st.sidebar:
 
 t = UI_TEXT["ko"] # Force Korean context
 st.title(t["title"])
-st.caption("음력/윤달 지원 & 정밀 분석 엔진 v15.1")
+st.caption("음력/윤달 지원 & 정밀 분석 엔진 v16.0")
 st.warning(f"**[{t['warn_title']}]**\n\n{t['warn_text']}")
 
 # A. Input Form
@@ -232,7 +236,8 @@ if not st.session_state.analysis_complete:
         submit = st.form_submit_button(t["submit_btn"])
     
     if submit:
-        if not city: st.error("⚠️ 도시를 입력하게.")
+        if not city: 
+            st.error("⚠️ 도시를 입력하게.")
         else:
             with st.spinner("⏳ 천기누설을 준비 중이네..."):
                 coords, city_name = get_coordinates(city)
@@ -248,27 +253,25 @@ if not st.session_state.analysis_complete:
                     saju_res = calculate_saju_v3(final_date.year, final_date.month, final_date.day, 
                                                time_val.hour, time_val.minute, coords[0], coords[1])
                     
-                    # 2. Logic (Use v15.1 Logic directly on Engine Output)
-                    facts = analyze_heavy_logic(saju_res)
+                    # 2. Logic (v16)
+                    facts = analyze_logic_v16(saju_res)
                     
                     st.session_state.saju_data_dict = facts
                     st.session_state.raw_input_data = {"date": str(final_date), "concern": concern}
                     
                     # 3. Report Generation
                     sys_p = f"""
-[ABSOLUTE FACTS]
-- Identity: {facts['metaphor']} (Day Master: {facts['identity']})
-- Strength: {facts['strength']}
-- Pattern: {facts['pattern']}
-- Advice Logic: {facts['advice']}
-- Shinsal: {facts['shinsal']}
-- User Concern: "{concern}"
+[NARRATIVE DATA]
+1. Identity: {facts['metaphor_narrative']} (Self: {facts['identity']})
+2. Strength: {facts['strength_narrative']}
+3. Pattern: {facts['pattern_narrative']}
+4. Shinsal: {facts['shinsal_narrative']}
+5. Solution: {facts['advice_narrative']}
+6. User Concern: "{concern}"
 
 [TASK]
-Write a report in Korean 'Hage-che'.
-1. 🐅 타고난 그릇 (Identity): Describe the Metaphor.
-2. 🗡️ 운명의 명암 (Analysis): Explain Strength and Pattern.
-3. ⚡ 신령의 처방 (Solution): Give the 'Advice Logic'.
+Convert the [NARRATIVE DATA] into a complete, flowing report in Korean 'Hage-che'.
+Do NOT add extra meanings. Use the provided narratives directly.
 """
                     st.session_state.saju_context = sys_p
                     msgs = [{"role": "system", "content": sys_p}, 
@@ -292,9 +295,13 @@ else:
         facts = st.session_state.saju_data_dict
         context_msg = f"""
 [CHAT CONTEXT]
-User: {facts['metaphor']} ({facts['identity']}). Pattern: {facts['pattern']}.
+User Identity: {facts['identity']} ({facts['raw_pattern']}).
+User Solution: {facts['advice_narrative']}
 Question: "{q}"
-Answer specifically using the data. Do NOT repeat the intro.
+
+[INSTRUCTION]
+Answer the question "{q}" specifically using the User Solution context.
+If asking about money/career, emphasize the 'Solution'. Do NOT repeat intro.
 """
         msgs = [{"role": "system", "content": context_msg}, 
                 {"role": "user", "content": q}]
