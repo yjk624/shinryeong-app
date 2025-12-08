@@ -1,4 +1,3 @@
-%%writefile app.py
 import streamlit as st
 import google.generativeai as genai
 from saju_engine import calculate_saju_v3
