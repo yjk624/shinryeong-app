@@ -6,7 +6,7 @@ import time as time_module
 from geopy.geocoders import Nominatim
 
 # ==========================================
-# 0. DIAGNOSTIC & CONFIGURATION
+# 0. CONFIGURATION & STATE
 # ==========================================
 st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
@@ -15,10 +15,10 @@ if "lang" not in st.session_state: st.session_state.lang = "ko"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
-if "run_analysis" not in st.session_state: st.session_state.run_analysis = False # NEW CRITICAL FLAG
+if "generation_needed" not in st.session_state: st.session_state.generation_needed = False # NEW CRITICAL FIX FLAG
 
 # API Setup
-geolocator = Nominatim(user_agent="shinryeong_v9_final", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_v10_final", timeout=10)
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -27,12 +27,12 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 1. UI TEXTS
+# 1. UI TEXTS (Retained)
 # ==========================================
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v9.0 (최종 안정화)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.0 (최종 안정화)",
         "sidebar_title": "설정",
         "lang_btn": "English Mode",
         "reset_btn": "새로운 상담 시작",
@@ -49,7 +49,7 @@ UI_TEXT = {
     },
     "en": {
         "title": "🔮 Shinryeong Destiny Report",
-        "caption": "Authentic Saju Analysis System v9.0 (Final Stability)",
+        "caption": "Authentic Saju Analysis System v10.0 (Final Stability)",
         "sidebar_title": "Settings",
         "lang_btn": "한국어 모드",
         "reset_btn": "Reset Session",
@@ -67,9 +67,10 @@ UI_TEXT = {
 }
 
 # ==========================================
-# 2. CORE LOGIC ENGINE (ALL 살 & Career Injection)
+# 2. CORE LOGIC ENGINE (v10.0 FIXES)
 # ==========================================
 def get_coordinates(city_input):
+    # (Geocoder logic remains the same)
     clean = city_input.strip()
     try:
         loc = geolocator.geocode(clean)
@@ -84,13 +85,13 @@ def get_ganji_year(year):
 
 def analyze_heavy_logic(saju_data):
     """
-    [FIXED] Includes comprehensive Shinsal and Career facts.
+    [EXPANDED] Includes comprehensive Shinsal and Characteristics.
     """
     day_stem = saju_data['Day'][0]
+    month_branch = saju_data['Month'][3]
     full_str = saju_data['Year'] + saju_data['Month'] + saju_data['Day'] + saju_data['Time']
     
-    # --- Strength Calculation (v8.2 Logic Retained) ---
-    month_branch = saju_data['Month'][3]
+    # --- Strength and Elements ---
     season_elem_map = {'인': '목', '묘': '목', '진': '목', '사': '화', '오': '화', '미': '화', '신': '금', '유': '금', '술': '금', '해': '수', '자': '수', '축': '수'}
     day_elem_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
     my_elem = day_elem_map.get(day_stem, '토')
@@ -99,7 +100,7 @@ def analyze_heavy_logic(saju_data):
     
     score = 0
     if month_elem in supporters[my_elem]: score += 100
-    else: score -= 100
+    else: score -= 100 
     
     for char in full_str:
         char_elem = ""
@@ -112,28 +113,29 @@ def analyze_heavy_logic(saju_data):
             
     strength_term = "신강(Strong - 주도적)" if score >= 40 else "신약(Weak - 환경 민감)"
     
-    # --- Shinsal (살) Injection (Expanded) ---
+    # --- Shinsal (살) Injection (EXPANDED) ---
     shinsal_list = []
     
-    # 1. Major Sal
-    if any(x in full_str for x in ["갑", "신", "묘", "오"]): shinsal_list.append("현침살(예리함/기술)")
-    if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(이동/해외)")
-    if any(x in full_str for x in ["자", "오", "묘", "유"]): shinsal_list.append("도화살(인기/매력)")
-    if ("진" in full_str and "술" in full_str): shinsal_list.append("괴강살(강력한 리더십/고집)")
+    if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 활동성 강함, 이동과 변화")
+    if any(x in full_str for x in ["자", "오", "묘", "유"]): shinsal_list.append("도화살(桃花煞): 인기를 끌고 주목받는 매력")
+    if any(x in full_str for x in ["갑", "신", "묘", "오"]): shinsal_list.append("현침살(懸針煞): 예민한 감각, 정밀한 기술")
+    if ("진" in full_str and "술" in full_str) or ("무" in full_str and "진" in full_str): shinsal_list.append("괴강/백호살: 강력한 카리스마, 굴복하지 않는 기질")
+    if "진" in full_str or "술" in full_str or "축" in full_str or "미" in full_str: shinsal_list.append("화개살(華蓋煞): 총명함, 예술성, 고독한 연구")
+    if "해" in full_str and "자" in full_str: shinsal_list.append("공망(空亡): 헛수고, 비현실성, 철학적 경향")
     
-    # 2. Secondary Sal (Character/Fate)
-    if "진" in full_str: shinsal_list.append("화개살(총명/예술/고독)")
-    if "해" in full_str and "자" in full_str: shinsal_list.append("공망(헛수고/철학)")
-    if "묘" in full_str and "진" in full_str: shinsal_list.append("원진살(배우자/직장 불화)")
+    shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "특별한 길흉 없이 평온한 기운"
 
-    shinsal_summary = ", ".join(shinsal_list) if shinsal_list else "특별한 길흉 없이 평온한 기운"
-
-    # --- Career Path Fact Sheet ---
-    career_map = {
-        '목': "기획/교육/건축/스타트업", '화': "방송/IT/예술/에너지", '토': "부동산/컨설팅/농업",
-        '금': "금융/의료/군경/공학", '수': "연구/무역/심리/요식업"
+    # --- Characteristics/Career Fact Sheet ---
+    # Simplified Ten God mapping based on My_elem and strength for interpretation
+    char_map = {
+        '목': "성장 욕구가 강하며 직진적. [적합 직업: 기획, 교육, 스타트업]", 
+        '화': "표현력과 감정 발산이 솔직함. [적합 직업: 방송, IT, 예술]",
+        '토': "신뢰와 중재 능력. 안정성을 추구함. [적합 직업: 부동산, 컨설팅, 행정]",
+        '금': "이성적, 냉철한 판단력, 완벽주의. [적합 직업: 금융, 의료, 감사]",
+        '수': "지혜롭고 유연함, 비밀 유지 능력. [적합 직업: 연구, 심리, 전문직]"
     }
-    career_fact = career_map.get(my_elem, "전문직")
+    
+    char_fact = char_map.get(my_elem, "균형 잡힌 기질")
     
     # --- Future Trend (3 Years) ---
     current_year = datetime.now().year
@@ -151,14 +153,13 @@ def analyze_heavy_logic(saju_data):
 
     # --- Lucky Color ---
     weak_colors = {'목':'검은색(수)', '화':'초록색(목)', '토':'붉은색(화)', '금':'노란색(토)', '수':'흰색(금)'}
-    strong_colors = {'목':'흰색(금)', '화':'검은색(수)', '토':'초록색(목)', '금':'붉은색(화)', '수':'노란색(토)'}
-    lucky_color = weak_colors.get(my_elem) if score < 40 else strong_colors.get(my_elem)
-
+    lucky_color = weak_colors.get(my_elem) if score < 40 else '흰색' # Default
+    
     return {
         "metaphor": identity_db.get(day_stem, "기운"),
         "strength": strength_term,
         "shinsal": shinsal_summary,
-        "career_base": career_fact,
+        "char_fact": char_fact,
         "trend": "\n".join(trend_text),
         "lucky_color": lucky_color
     }
@@ -178,7 +179,6 @@ def generate_ai_response(messages, lang_mode):
     
     for model in models:
         try:
-            # Generate full response text (Blocking call)
             stream = client.chat.completions.create(
                 model=model, messages=messages, temperature=0.6, max_tokens=3000, stream=False
             )
@@ -192,17 +192,17 @@ def generate_ai_response(messages, lang_mode):
     return "⚠️ AI 연결 지연. 잠시 후 다시 시도해주세요."
 
 # ==========================================
-# 3. UI LAYOUT & MAIN ROUTER (FIXED)
+# 4. UI LAYOUT & MAIN ROUTER
 # ==========================================
 with st.sidebar:
     t = UI_TEXT[st.session_state.lang]
     st.title(t["sidebar_title"])
     
-    # DIAGNOSTIC PANEL
+    # DIAGNOSTIC PANEL (Always show for debugging)
     with st.expander("🛠️ System Diagnostic", expanded=True):
         st.caption(f"Status: {'✅ Complete' if st.session_state.analysis_complete else '❌ Pending'}")
         st.caption(f"Msg Count: {len(st.session_state.messages)}")
-        st.caption(f"Run Flag: {st.session_state.run_analysis}")
+        st.caption(f"Run Flag: {st.session_state.run_analysis}") # New flag status
 
     if st.button(t["lang_btn"]):
         st.session_state.lang = "en" if st.session_state.lang == "ko" else "ko"
@@ -217,7 +217,7 @@ st.title(t["title"])
 st.caption(t["caption"])
 st.warning(f"**[{t['warn_title']}]**\n\n{t['warn_text']}")
 
-# [STATE A] INPUT FORM (Generates and Stores Context)
+# [STATE A] INPUT FORM (Saves Context and Triggers Rerun)
 if not st.session_state.analysis_complete:
     with st.form("main_form"):
         c1, c2 = st.columns(2)
@@ -241,7 +241,7 @@ if not st.session_state.analysis_complete:
                                            time_val.hour, time_val.minute, coords[0], coords[1])
                     facts = analyze_heavy_logic(saju)
                     
-                    # 1. Prompt Setup
+                    # 1. Prompt Setup (Store the full script)
                     if st.session_state.lang == "ko":
                         titles = {"t1": "1. 🐅 타고난 그릇과 기질", "t2": "2. ☁️ 다가올 미래의 흐름과 리스크 (3년)", "t3": "3. ⚡ 신령의 처방 및 개운", "s1": "행동", "s2": "마인드셋", "s3": "개운법"}
                     else:
@@ -256,10 +256,9 @@ User Concern: "{concern}"
 [OUTPUT TEMPLATE]
 ## {t['title']}
 ### {titles['t1']}
-(Explain '{facts['metaphor']}' and '{facts['strength']}'. Use the Shinsal: {facts['shinsal']}. Trigger 
-
-[Image of Five Elements Cycle]
-.)
+(Explain '{facts['metaphor']}' and '{facts['strength']}'. Use the Shinsal: {facts['shinsal']}. 
+Trigger
+ to explain the balance.)
 ### {titles['t2']}
 (Analyze the trend below.)
 {facts['trend']}
@@ -269,35 +268,33 @@ User Concern: "{concern}"
 * **{titles['s3']}:** (Color: {facts['lucky_color']})
 """
                     st.session_state.saju_context = sys_p
-                    st.session_state.analysis_complete = True # Transition flag set
                     st.session_state.run_analysis = True # CRITICAL: Flag to run generation in the next cycle
                     
                     st.rerun()
 
-# [STATE B] CHAT INTERFACE (FIXED: Generation happens AFTER the state is set)
+# [STATE B] CHAT INTERFACE (The Execution and Display Block)
 else:
-    # 1. Trigger Initial Generation (If coming from form submit)
+    # 1. Execute Initial Generation (If flag is set)
     if st.session_state.run_analysis:
-        st.session_state.run_analysis = False # Reset flag
+        st.session_state.run_analysis = False # Consume the flag
 
-        with st.spinner(t["loading"]): # Use loading spinner while fetching
-            # Run the generation process safely
+        # Execute generation safely within a spinner
+        with st.spinner(t["loading"]):
             msgs = [{"role": "system", "content": st.session_state.saju_context}, 
                     {"role": "user", "content": "Analyze."}]
             
             full_resp = generate_ai_response(msgs, st.session_state.lang) 
             
-            # Check for API failure
+            # Save message and trigger rerun to move the message out of the spinner block
             if full_resp.startswith("⚠️ AI 연결 지연"):
-                st.error(full_resp)
-                # DO NOT save the error message into history to keep it clean
+                 st.session_state.messages.append({"role": "assistant", "content": full_resp}) # Save error for history
             else:
                 st.session_state.messages.append({"role": "assistant", "content": full_resp})
-                # Re-run once to display the new message correctly in the history loop
-                st.rerun()
+            
+            st.rerun()
 
 
-    # 2. Display History (This loop is the core chat display)
+    # 2. Display History
     for m in st.session_state.messages:
         with st.chat_message(m["role"]): st.markdown(m["content"])
         
