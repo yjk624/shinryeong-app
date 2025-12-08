@@ -3,7 +3,6 @@ from groq import Groq
 from saju_engine import calculate_saju_v3
 from datetime import datetime, time
 from geopy.geocoders import Nominatim
-from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import os
@@ -13,8 +12,10 @@ import os
 # ==========================================
 st.set_page_config(page_title="신령 (Shinryeong)", page_icon="🔮", layout="centered")
 
-geolocator = Nominatim(user_agent="shinryeong_app_v14_pro_logic", timeout=10)
+# Robust Geocoding
+geolocator = Nominatim(user_agent="shinryeong_app_v15_pro_final", timeout=10)
 
+# Initialize Groq
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -22,6 +23,7 @@ except Exception as e:
     st.error(f"🚨 Connection Error: {e}")
     st.stop()
 
+# Session State
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "user_info_logged" not in st.session_state: st.session_state.user_info_logged = False
@@ -41,7 +43,7 @@ PROMPT_TEXT = load_text_file("prompt.txt")
 KNOWLEDGE_TEXT = load_text_file("knowledgebase.txt")
 
 # ==========================================
-# 3. HELPER FUNCTIONS
+# 3. HELPER FUNCTIONS & LOGIC
 # ==========================================
 CITY_DB = {
     "서울": (37.56, 126.97), "Seoul": (37.56, 126.97),
@@ -57,8 +59,7 @@ CITY_DB = {
     "제주": (33.49, 126.53), "Jeju": (33.49, 126.53),
     "강릉": (37.75, 128.87), "Gangneung": (37.75, 128.87),
     "New York": (40.71, -74.00), "London": (51.50, -0.12),
-    "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65),
-    "Los Angeles": (34.05, -118.24), "Sydney": (-33.86, 151.20)
+    "Paris": (48.85, 2.35), "Tokyo": (35.67, 139.65)
 }
 
 def get_coordinates(city_input):
@@ -97,6 +98,35 @@ def save_to_database(user_data, birth_date_obj, birth_time_obj, concern, is_luna
         sheet.append_row(row)
     except: pass
 
+# [NEW] COLD READING ENGINE
+# Calculates a "Hit" fact to make the AI look psychic
+def calculate_cold_reading(saju_data):
+    """
+    Returns a specific sentence about 2024/2025 based on simple Saju logic.
+    This gives the 'How did it know?' effect.
+    """
+    try:
+        # Extract Day Branch (e.g., "Jin" from "Mu-Jin")
+        day_pillar = saju_data['Day'] # "Mu-Jin"
+        day_branch = day_pillar.split('-')[1].split('(')[0].strip() # "Jin"
+        
+        # Simple Logic for 2024 (Dragon/Jin Year) and 2025 (Snake/Sa Year)
+        # 1. Same Zodiac (Jihyeong) -> Stress/Headache
+        if "Jin" in day_branch: 
+            return "2024년은 '자형(Self-Punishment)'의 해였으니, 스스로를 볶아대거나 남모를 속앓이를 많이 하지 않았는가?"
+        # 2. Clash (Chung) -> Change/Separation
+        elif "Sul" in day_branch: # Dog clashes with Dragon
+            return "2024년에 큰 이동수나 인간관계의 정리가 한 차례 지나갔을 터인데, 마음의 정리가 되었는가?"
+        # 3. Water Day Master -> 2025 Snake is Wealth -> Money concerns
+        elif "Im" in saju_data['Day'] or "Gye" in saju_data['Day']:
+            return "다가오는 2025년은 재물운이 꿈틀거리니, 돈과 관련된 고민이 깊어지고 있지 않은가?"
+        # Default
+        else:
+            return "최근 1~2년 사이 환경이 급변하여, 마치 안개 속을 걷는 듯한 막막함을 느꼈을 수 있네."
+            
+    except:
+        return "그대의 운명에는 남들과 다른 독특한 기운이 서려있군."
+
 def generate_ai_response(messages):
     models = ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "llama-3.1-8b-instant"]
     for model in models:
@@ -104,7 +134,7 @@ def generate_ai_response(messages):
             stream = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                temperature=0.5, # Lowered for logic/language precision
+                temperature=0.4, # Lower temperature for stricter adherence to facts
                 max_tokens=5000,
                 top_p=1,
                 stream=True,
@@ -131,7 +161,7 @@ TRANS = {
         "subtitle": "AI 정통 명리학 분석가",
         "warning": "⚖️ 본 분석은 명리학적 통계에 기반한 학술적 자료이며, 법률/의학적 조언이 아닙니다.",
         "submit_btn": "🔮 신령에게 정밀 분석 요청하기",
-        "loading": "⏳ 사주 명식을 세우고 신령을 소환하는 중...",
+        "loading": "⏳ 사주 명식을 세우고 운명의 흐름을 읽는 중...",
         "geo_error": "⚠️ 위치를 찾을 수 없습니다. (예: 서울, 부산)",
         "chat_placeholder": "결과에 대해 더 궁금한 점이 있으신가요?",
         "reset_btn": "🔄 새로운 분석",
@@ -139,7 +169,7 @@ TRANS = {
         "male": "남성", "female": "여성", "loc_label": "태어난 지역",
         "concern_label": "가장 큰 고민은 무엇인가요?",
         "cal_label": "양력/음력 구분",
-        "theory_header": "📚 분석 근거 및 기술적 해설 (Technical Basis)"
+        "theory_header": "📚 분석 근거 (Technical Basis)"
     },
     "en": {
         "title": "🔮 Shinryeong",
@@ -205,6 +235,9 @@ if not st.session_state.saju_context:
                     saju['Birth_Place'] = city_name
                     saju['Gender'] = gender
                     
+                    # Generate Cold Reading Fact
+                    cold_reading_fact = calculate_cold_reading(saju)
+                    
                     # CSV Format
                     csv_display = f"""
                     | Parameter | Value |
@@ -217,54 +250,60 @@ if not st.session_state.saju_context:
                     """
                     
                     # ----------------------------------------------------
-                    # ULTIMATE SYSTEM PROMPT (Logic & Structure)
+                    # ULTIMATE SYSTEM PROMPT (Fixed Identity)
                     # ----------------------------------------------------
                     current_year = datetime.now().year
                     
                     system_prompt = f"""
                     [SYSTEM ROLE]
-                    You are 'Shinryeong'. You are a master Saju analyst.
+                    You are 'Shinryeong'. Master Saju Analyst.
                     Tone: Authoritative, Insightful, "Hage-che" (하게체).
-                    Language: STRICTLY KOREAN (한국어). Do not use English in the final report unless it is code.
+                    Language: STRICTLY KOREAN (한국어). No Japanese/Chinese characters unless in brackets.
                     
                     [KNOWLEDGE BASE]
                     {KNOWLEDGE_TEXT[:3500]}
                     
-                    [USER DATA]
-                    - Saju: {saju}
-                    - Gender: {gender}
-                    - Location: {city_name}
+                    [USER IDENTITY - DO NOT CONFUSE THIS]
+                    - **IDENTITY (Day Master/Il-ju):** {saju['Day']} <--- THIS IS THE USER.
+                    - Environment (Month): {saju['Month']}
+                    - Ancestor (Year): {saju['Year']}
+                    - Future (Time): {saju['Time']}
                     - Concern: "{q}"
-                    - Current Year: {current_year}
+                    
+                    [COLD READING DATA]
+                    Use this fact in Section 2 to prove accuracy:
+                    "{cold_reading_fact}"
                     
                     [REQUIRED OUTPUT FORMAT]
                     1. **Start with the CSV Table provided.**
-                    2. **Use the following Sections EXACTLY:**
+                    2. **Use these EXACT Sections:**
                     
                     ### 🔮 1. 타고난 명(命)과 기질
-                    (Analyze the Day Master (Il-gan) and its relation to the Month (Season). Use metaphors like 'Winter Ocean' or 'Burning Sun'. Explain the personality deeply.)
+                    (Analyze the Day Master '{saju['Day']}' deeply. Explain its relation to the Month. Use metaphors like 'Winter Ocean' or 'Burning Sun'.)
                     
                     ### 🗡️ 2. 특별한 능력과 직업 (재능 매핑)
-                    (Analyze the 'Ten Gods' (Sipseong) structure. What is their weapon? e.g., 'Expression Star' = Art/Speech. 'Power Star' = Organization/Law. Recommend specific modern careers.)
+                    (Analyze the 'Ten Gods' (Sipseong). What is their weapon? e.g., 'Expression Star' = Art/Speech. Recommend specific careers.)
                     
-                    ### ☁️ 3. 가까운 미래의 흐름 (Near Future Prediction)
-                    (Analyze the interaction between the User's Pillars and the Current Year {current_year} and Next Year. Look for Clashes (Chung) or Combinations (Hap). Predict the trend regarding their concern.)
+                    ### 👁️ 3. 신령의 공명 (Accuracy Check)
+                    (State the Cold Reading fact provided above confidently. Ask if it is true.)
                     
-                    ### 🛡️ 4. 신령의 처방 (Action Plan)
-                    * **행동 지침:** (Specific action)
-                    * **마음가짐:** (Mental approach)
-                    * **개운 아이템:** (Lucky color/direction)
-                    (Explain *WHY* based on the missing element in their chart. e.g., "You lack Fire, so seek bright places.")
+                    ### ☁️ 4. 가까운 미래의 흐름 (Near Future)
+                    (Analyze the interaction between the User's Pillars and {current_year} and {current_year+1}.)
+                    
+                    ### 🛡️ 5. 신령의 처방 (Action Plan)
+                    * **행동 지침:** ...
+                    * **마음가짐:** ...
+                    * **개운 아이템:** ...
                     
                     [[TECHNICAL_SECTION]]
-                    (Detail the technical logic here: "The Day Master is Weak Water, and the Month is Earth, creating a conflict...")
+                    (Technical logic.)
                     """
                     
                     st.session_state.saju_context = system_prompt
                     
                     msgs = [
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Analyze my Saju deeply. My concern is: {q}"}
+                        {"role": "user", "content": f"Analyze my Saju ({saju['Day']}). My concern is: {q}"}
                     ]
                     
                     response_container = st.empty()
@@ -281,7 +320,7 @@ if not st.session_state.saju_context:
                     else:
                         main_r, theory_r = full_text, "Analysis based on standard Saju logic."
 
-                    # Insert CSV manually at the top to guarantee it exists
+                    # Insert CSV manually at the top
                     final_display = f"### 📜 신령의 분석 보고서\n\n{csv_display}\n\n---\n\n{main_r}"
                     
                     st.markdown(final_display)
