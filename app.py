@@ -10,23 +10,12 @@ import json
 # ==========================================
 # 1. CONFIGURATION (GROQ ENGINE)
 # ==========================================
-geolocator = Nominatim(user_agent="shinryeong_app_groq_v2")
+geolocator = Nominatim(user_agent="shinryeong_app_groq_v3")
 
 # Initialize Groq Client
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
-    
-    # [FIX] Switched to the new supported model: Llama 3.3
-    # Old: llama3-70b-8192 (Retired)
-    # New: llama-3.3-70b-versatile (Active)
-    TEST_MODEL = "llama-3.3-70b-versatile"
-    
-    # Test Connection
-    client.chat.completions.create(
-        messages=[{"role": "user", "content": "test"}],
-        model=TEST_MODEL,
-    )
 except Exception as e:
     st.error(f"🚨 Connection Error: {e}")
     st.stop()
@@ -91,8 +80,11 @@ def get_coordinates(city_name):
     return None
 
 def generate_ai_response(messages):
-    completion = client.chat.completions.create(
-        model="llama-3.3-70b-versatile", # [FIX] Updated to new supported model
+    """
+    Generator function that streams clean text from Groq.
+    """
+    stream = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
         messages=messages,
         temperature=0.7,
         max_tokens=2048,
@@ -100,7 +92,10 @@ def generate_ai_response(messages):
         stream=True,
         stop=None,
     )
-    return completion
+    # [FIX] Unpack the JSON chunks here so Streamlit gets pure text
+    for chunk in stream:
+        if chunk.choices[0].delta.content is not None:
+            yield chunk.choices[0].delta.content
 
 # ==========================================
 # 4. UI LAYOUT
@@ -186,9 +181,11 @@ if not st.session_state.saju_context:
                     ]
                     
                     try:
+                        # Stream the response
                         stream = generate_ai_response(msgs)
                         response_text = st.write_stream(stream)
                         
+                        # Save to history
                         st.session_state.messages.append({"role": "user", "content": q})
                         st.session_state.messages.append({"role": "assistant", "content": response_text})
                         
@@ -222,4 +219,3 @@ else:
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
             except:
                 st.error("Connection failed.")
-                
