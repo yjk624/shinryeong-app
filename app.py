@@ -10,16 +10,22 @@ import json
 # ==========================================
 # 1. CONFIGURATION (GROQ ENGINE)
 # ==========================================
-geolocator = Nominatim(user_agent="shinryeong_app_groq")
+geolocator = Nominatim(user_agent="shinryeong_app_groq_v2")
 
 # Initialize Groq Client
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
+    
+    # [FIX] Switched to the new supported model: Llama 3.3
+    # Old: llama3-70b-8192 (Retired)
+    # New: llama-3.3-70b-versatile (Active)
+    TEST_MODEL = "llama-3.3-70b-versatile"
+    
     # Test Connection
     client.chat.completions.create(
         messages=[{"role": "user", "content": "test"}],
-        model="llama3-70b-8192",
+        model=TEST_MODEL,
     )
 except Exception as e:
     st.error(f"🚨 Connection Error: {e}")
@@ -86,7 +92,7 @@ def get_coordinates(city_name):
 
 def generate_ai_response(messages):
     completion = client.chat.completions.create(
-        model="llama3-70b-8192", # Free, fast, and smart model
+        model="llama-3.3-70b-versatile", # [FIX] Updated to new supported model
         messages=messages,
         temperature=0.7,
         max_tokens=2048,
@@ -130,7 +136,7 @@ with st.sidebar:
     if st.button(txt["reset_btn"]):
         st.session_state.clear()
         st.rerun()
-    st.caption("Engine: Groq Llama-3")
+    st.caption("Engine: Groq Llama-3.3")
 
 st.title(txt["title"])
 st.caption(txt["subtitle"])
@@ -216,3 +222,4 @@ else:
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
             except:
                 st.error("Connection failed.")
+                
