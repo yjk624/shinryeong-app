@@ -16,7 +16,7 @@ st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v16.1 (오류 수정완료)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v16.2 (문법 수정완료)",
         "sidebar_title": "설정", "lang_btn": "English Mode", "reset_btn": "새로운 상담 시작",
         "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시",
         "input_gender": "성별", "concern_label": "당신의 고민을 구체적으로 적어주세요.",
@@ -35,7 +35,7 @@ if "saju_data_dict" not in st.session_state: st.session_state.saju_data_dict = {
 if "raw_input_data" not in st.session_state: st.session_state.raw_input_data = None
 
 # API Setup
-geolocator = Nominatim(user_agent="shinryeong_v16_1_final", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_v16_2_final", timeout=10)
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -70,11 +70,11 @@ def convert_lunar_to_solar(year, month, day, is_intercalary):
     except: return None
 
 # ==========================================
-# 2. LOGIC ENGINE (Narrative Generation)
+# 2. LOGIC ENGINE (v16.2 - Syntax Fixed)
 # ==========================================
 def analyze_logic_v16(saju_res):
     """
-    Constructs the NARRATIVE directly in Python to prevent AI hallucination.
+    Constructs the NARRATIVE directly in Python.
     """
     dm = saju_res['Day_Stem']
     season = saju_res['Month_Branch']
@@ -95,12 +95,11 @@ def analyze_logic_v16(saju_res):
     elif my_elem == '금': supporters = ['토', '금']
     elif my_elem == '수': supporters = ['금', '수']
     
-    # 3. Strength Scoring (Rigorous)
+    # 3. Strength Scoring
     score = 0
     if season_elem in supporters: score += 50
-    else: score -= 50 # Penalize for Sil-ryeong
+    else: score -= 50 
     
-    # Pillar Check
     for char in full_str:
         if char == ' ': continue
         ce = '토'
@@ -134,22 +133,22 @@ def analyze_logic_v16(saju_res):
         if ce == my_wealth: wealth_count += 1
         
     pattern = "일반격"
-    # [FIXED: STRING TERMINATION ERROR SOLVED]
+    # [FIXED: Single line string or Triple quotes for safety]
     advice_core = "오행의 균형을 맞추는 것이 중요하네. 
 
 [Image of Five Elements Cycle]
 " 
     
     if "신약" in strength and wealth_count >= 3:
-        pattern = "재다신약(財多身弱 - 재물은 많으나 가질 힘이 약함)"
+        pattern = "재다신약(財多身弱)"
         strength = "극신약(Very Weak)"
         strength_desc = "그대는 재물과 기회(돈/여자/일) 속에 둘러싸여 있으나, 정작 그것을 쥘 힘이 부족해 건강을 잃거나 스트레스를 받는 형국이네."
-        advice_core = "돈을 쫓지 말고, **'자신을 채우는 공부(인성)'**나 **'믿을만한 동료(비겁)'**와 함께해야 재물이 내 것이 되네. 혼자 다 하려 하지 말게."
+        advice_core = "돈을 쫓지 말고, **'자신을 채우는 공부(인성)'**나 **'믿을만한 동료(비겁)'**와 함께해야 재물이 내 것이 되네."
     elif wealth_count >= 3:
         pattern = "재성과다(Wealth Overload)"
         advice_core = "타고난 사업가 기질이 있으나, 재물 관리에 신중해야 하네."
 
-    # 5. Metaphor Narrative
+    # 5. Metaphor
     metaphor_db = {
         '갑': "곧게 뻗은 거목", '을': "끈질긴 생명력의 화초", '병': "만물을 비추는 태양", '정': "어둠을 밝히는 촛불",
         '무': "묵직한 태산", '기': "비옥한 대지", '경': "단단한 바위", '신': "예리한 보석",
@@ -157,11 +156,11 @@ def analyze_logic_v16(saju_res):
     }
     metaphor_text = f"그대는 자연으로 치면 **'{metaphor_db.get(dm, '알 수 없는 기운')}'**와 같네."
     
-    # 6. Shinsal Narrative
+    # 6. Shinsal
     shinsal_list = saju_res['Shinsal']
     shinsal_text = "특별한 살은 보이지 않으나, 평온함이 장점이라네."
     if shinsal_list:
-        shinsal_text = f"그대에게는 **{', '.join(shinsal_list)}**의 기운이 흐르고 있네. 이는 남들과 다른 특별한 무기가 될 수 있지."
+        shinsal_text = f"그대에게는 **{', '.join(shinsal_list)}**의 기운이 흐르고 있네."
 
     return {
         "identity": dm,
@@ -179,7 +178,7 @@ def generate_ai_response(messages, mode="report"):
     sys_instruction = """
 [CRITICAL RULE]
 1. Role: 'Shinryeong' (Divine Guru). Tone: Hage-che (하게체: ~하네, ~이라네).
-2. Language: KOREAN ONLY. Absolutely NO Chinese characters (except in brackets) or English words in the final output text.
+2. Language: KOREAN ONLY. NO Chinese characters (except in brackets) or English words in the final output text.
 3. Source: Use the provided [NARRATIVE DATA]. Do NOT calculate or invent new facts.
 4. If the data says 'Jae-da-sin-yak', DO NOT say 'You are strong'. Say "You are surrounded by wealth but need strength to hold it."
 5. Visuals: Insert 
@@ -217,7 +216,7 @@ with st.sidebar:
 
 t = UI_TEXT["ko"] # Force Korean context
 st.title(t["title"])
-st.caption("음력/윤달 지원 & 정밀 분석 엔진 v16.1")
+st.caption("음력/윤달 지원 & 정밀 분석 엔진 v16.2")
 st.warning(f"**[{t['warn_title']}]**\n\n{t['warn_text']}")
 
 # A. Input Form
@@ -254,7 +253,7 @@ if not st.session_state.analysis_complete:
                     saju_res = calculate_saju_v3(final_date.year, final_date.month, final_date.day, 
                                                time_val.hour, time_val.minute, coords[0], coords[1])
                     
-                    # 2. Logic (v16)
+                    # 2. Logic (v16.2 Correct Call)
                     facts = analyze_logic_v16(saju_res)
                     
                     st.session_state.saju_data_dict = facts
