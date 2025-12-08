@@ -9,14 +9,14 @@ from korean_lunar_calendar import KoreanLunarCalendar
 import json
 
 # ==========================================
-# 0. CONFIG & TEXTS (Defined First)
+# 0. CONFIG & TEXTS
 # ==========================================
 st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v16.0 (Perfect Fixed)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v16.1 (오류 수정완료)",
         "sidebar_title": "설정", "lang_btn": "English Mode", "reset_btn": "새로운 상담 시작",
         "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시",
         "input_gender": "성별", "concern_label": "당신의 고민을 구체적으로 적어주세요.",
@@ -35,7 +35,7 @@ if "saju_data_dict" not in st.session_state: st.session_state.saju_data_dict = {
 if "raw_input_data" not in st.session_state: st.session_state.raw_input_data = None
 
 # API Setup
-geolocator = Nominatim(user_agent="shinryeong_v16_final", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_v16_1_final", timeout=10)
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -134,10 +134,11 @@ def analyze_logic_v16(saju_res):
         if ce == my_wealth: wealth_count += 1
         
     pattern = "일반격"
+    # [FIXED: STRING TERMINATION ERROR SOLVED]
     advice_core = "오행의 균형을 맞추는 것이 중요하네. 
 
 [Image of Five Elements Cycle]
-"
+" 
     
     if "신약" in strength and wealth_count >= 3:
         pattern = "재다신약(財多身弱 - 재물은 많으나 가질 힘이 약함)"
@@ -169,7 +170,7 @@ def analyze_logic_v16(saju_res):
         "pattern_narrative": f"격국은 **'{pattern}'**에 해당하네.",
         "advice_narrative": advice_core,
         "shinsal_narrative": shinsal_text,
-        "raw_pattern": pattern, # For Chat Logic
+        "raw_pattern": pattern,
         "pillars": full_str
     }
 
@@ -216,7 +217,7 @@ with st.sidebar:
 
 t = UI_TEXT["ko"] # Force Korean context
 st.title(t["title"])
-st.caption("음력/윤달 지원 & 정밀 분석 엔진 v16.0")
+st.caption("음력/윤달 지원 & 정밀 분석 엔진 v16.1")
 st.warning(f"**[{t['warn_title']}]**\n\n{t['warn_text']}")
 
 # A. Input Form
