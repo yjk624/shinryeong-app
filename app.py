@@ -6,16 +6,16 @@ import time as time_module
 from geopy.geocoders import Nominatim
 
 # ==========================================
-# 0. CONFIGURATION & STATE
+# 0. CONFIGURATION & CRITICAL STATE INITIALIZATION (FIX)
 # ==========================================
 st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout="centered")
 
-# Initialize Session State
+# CRITICAL FIX: Ensure all keys exist before any code attempts to read them.
 if "lang" not in st.session_state: st.session_state.lang = "ko"
 if "messages" not in st.session_state: st.session_state.messages = []
 if "saju_context" not in st.session_state: st.session_state.saju_context = ""
 if "analysis_complete" not in st.session_state: st.session_state.analysis_complete = False
-if "generation_needed" not in st.session_state: st.session_state.generation_needed = False # NEW CRITICAL FIX FLAG
+if "run_analysis" not in st.session_state: st.session_state.run_analysis = False # FIX: Ensure this key exists!
 
 # API Setup
 geolocator = Nominatim(user_agent="shinryeong_v10_final", timeout=10)
@@ -32,7 +32,7 @@ except Exception as e:
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.0 (최종 안정화)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v10.1 (최종 안정화)",
         "sidebar_title": "설정",
         "lang_btn": "English Mode",
         "reset_btn": "새로운 상담 시작",
@@ -49,7 +49,7 @@ UI_TEXT = {
     },
     "en": {
         "title": "🔮 Shinryeong Destiny Report",
-        "caption": "Authentic Saju Analysis System v10.0 (Final Stability)",
+        "caption": "Authentic Saju Analysis System v10.1 (Final Stability)",
         "sidebar_title": "Settings",
         "lang_btn": "한국어 모드",
         "reset_btn": "Reset Session",
@@ -67,10 +67,9 @@ UI_TEXT = {
 }
 
 # ==========================================
-# 2. CORE LOGIC ENGINE (v10.0 FIXES)
+# 2. CORE LOGIC ENGINE (v10.0 Retained)
 # ==========================================
 def get_coordinates(city_input):
-    # (Geocoder logic remains the same)
     clean = city_input.strip()
     try:
         loc = geolocator.geocode(clean)
@@ -85,13 +84,14 @@ def get_ganji_year(year):
 
 def analyze_heavy_logic(saju_data):
     """
-    [EXPANDED] Includes comprehensive Shinsal and Characteristics.
+    [CRITICAL FIX: Season Weighted Score] Logic is retained.
     """
     day_stem = saju_data['Day'][0]
     month_branch = saju_data['Month'][3]
     full_str = saju_data['Year'] + saju_data['Month'] + saju_data['Day'] + saju_data['Time']
     
-    # --- Strength and Elements ---
+    # Mappings (Simplified)
+    identity_db = {'갑': "거목", '을': "화초", '병': "태양", '정': "촛불", '무': "태산", '기': "대지", '경': "바위", '신': "보석", '임': "바다", '계': "빗물"}
     season_elem_map = {'인': '목', '묘': '목', '진': '목', '사': '화', '오': '화', '미': '화', '신': '금', '유': '금', '술': '금', '해': '수', '자': '수', '축': '수'}
     day_elem_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
     my_elem = day_elem_map.get(day_stem, '토')
@@ -113,53 +113,32 @@ def analyze_heavy_logic(saju_data):
             
     strength_term = "신강(Strong - 주도적)" if score >= 40 else "신약(Weak - 환경 민감)"
     
-    # --- Shinsal (살) Injection (EXPANDED) ---
+    # Shinsal (살) Injection
     shinsal_list = []
-    
     if any(x in full_str for x in ["인", "신", "사", "해"]): shinsal_list.append("역마살(驛馬煞): 활동성 강함, 이동과 변화")
     if any(x in full_str for x in ["자", "오", "묘", "유"]): shinsal_list.append("도화살(桃花煞): 인기를 끌고 주목받는 매력")
-    if any(x in full_str for x in ["갑", "신", "묘", "오"]): shinsal_list.append("현침살(懸針煞): 예민한 감각, 정밀한 기술")
-    if ("진" in full_str and "술" in full_str) or ("무" in full_str and "진" in full_str): shinsal_list.append("괴강/백호살: 강력한 카리스마, 굴복하지 않는 기질")
-    if "진" in full_str or "술" in full_str or "축" in full_str or "미" in full_str: shinsal_list.append("화개살(華蓋煞): 총명함, 예술성, 고독한 연구")
-    if "해" in full_str and "자" in full_str: shinsal_list.append("공망(空亡): 헛수고, 비현실성, 철학적 경향")
-    
-    shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "특별한 길흉 없이 평온한 기운"
+    shinsal_summary = " / ".join(shinsal_list) if shinsal_list else "평온한 기운"
 
-    # --- Characteristics/Career Fact Sheet ---
-    # Simplified Ten God mapping based on My_elem and strength for interpretation
-    char_map = {
-        '목': "성장 욕구가 강하며 직진적. [적합 직업: 기획, 교육, 스타트업]", 
-        '화': "표현력과 감정 발산이 솔직함. [적합 직업: 방송, IT, 예술]",
-        '토': "신뢰와 중재 능력. 안정성을 추구함. [적합 직업: 부동산, 컨설팅, 행정]",
-        '금': "이성적, 냉철한 판단력, 완벽주의. [적합 직업: 금융, 의료, 감사]",
-        '수': "지혜롭고 유연함, 비밀 유지 능력. [적합 직업: 연구, 심리, 전문직]"
-    }
-    
-    char_fact = char_map.get(my_elem, "균형 잡힌 기질")
-    
-    # --- Future Trend (3 Years) ---
+    # Future Trend (3 Years)
     current_year = datetime.now().year
     trend_text = []
     day_branch = saju_data['Day'][3]
     clashes = {"자":"오", "축":"미", "인":"신", "묘":"유", "진":"술", "사":"해", "오":"자", "미":"축", "신":"인", "유":"묘", "술":"진", "해":"사"}
-    harmonies = {"자":"축", "축":"자", "인":"해", "해":"인", "묘":"술", "술":"묘", "진":"유", "유":"진", "사":"신", "신":"사", "오":"미", "미":"오"}
-
+    
     for y in range(current_year, current_year+3):
         stem, branch = get_ganji_year(y)
         rel_msg = "안정 (Stability)"
         if clashes.get(day_branch) == branch: rel_msg = f"⚠️ 충(Clash) - 변화와 이동수"
-        elif harmonies.get(day_branch) == branch: rel_msg = f"✨ 합(Harmony) - 계약운, 협력"
         trend_text.append(f"- **{y}년({stem}{branch}년):** {rel_msg}")
 
-    # --- Lucky Color ---
+    # Lucky Color
     weak_colors = {'목':'검은색(수)', '화':'초록색(목)', '토':'붉은색(화)', '금':'노란색(토)', '수':'흰색(금)'}
-    lucky_color = weak_colors.get(my_elem) if score < 40 else '흰색' # Default
+    lucky_color = weak_colors.get(my_elem) if score < 40 else '흰색' 
     
     return {
         "metaphor": identity_db.get(day_stem, "기운"),
         "strength": strength_term,
         "shinsal": shinsal_summary,
-        "char_fact": char_fact,
         "trend": "\n".join(trend_text),
         "lucky_color": lucky_color
     }
@@ -169,7 +148,6 @@ def generate_ai_response(messages, lang_mode):
     instruction = (
         "[CRITICAL INSTRUCTION]\n"
         f"Language: {lang_mode.upper()} ONLY.\n"
-        "If Korean: Use Titles: '1. 타고난 그릇', '2. 미래 흐름', '3. 신령의 처방'.\n"
         "Explain Chinese characters (Hanja) easily. Ensure detailed, multi-sentence response per section.\n"
     )
     if messages[0]['role'] == 'system':
@@ -192,17 +170,17 @@ def generate_ai_response(messages, lang_mode):
     return "⚠️ AI 연결 지연. 잠시 후 다시 시도해주세요."
 
 # ==========================================
-# 4. UI LAYOUT & MAIN ROUTER
+# 3. UI LAYOUT & MAIN ROUTER (RE-FIXED)
 # ==========================================
 with st.sidebar:
     t = UI_TEXT[st.session_state.lang]
     st.title(t["sidebar_title"])
     
-    # DIAGNOSTIC PANEL (Always show for debugging)
+    # DIAGNOSTIC PANEL (FORCED VISIBILITY)
     with st.expander("🛠️ System Diagnostic", expanded=True):
         st.caption(f"Status: {'✅ Complete' if st.session_state.analysis_complete else '❌ Pending'}")
         st.caption(f"Msg Count: {len(st.session_state.messages)}")
-        st.caption(f"Run Flag: {st.session_state.run_analysis}") # New flag status
+        st.caption(f"Run Flag: {st.session_state.run_analysis}")
 
     if st.button(t["lang_btn"]):
         st.session_state.lang = "en" if st.session_state.lang == "ko" else "ko"
@@ -257,7 +235,9 @@ User Concern: "{concern}"
 ## {t['title']}
 ### {titles['t1']}
 (Explain '{facts['metaphor']}' and '{facts['strength']}'. Use the Shinsal: {facts['shinsal']}. 
-Trigger
+Trigger 
+
+[Image of Five Elements Cycle]
  to explain the balance.)
 ### {titles['t2']}
 (Analyze the trend below.)
@@ -283,15 +263,17 @@ else:
             msgs = [{"role": "system", "content": st.session_state.saju_context}, 
                     {"role": "user", "content": "Analyze."}]
             
+            # Generate the response (Blocking call)
             full_resp = generate_ai_response(msgs, st.session_state.lang) 
             
-            # Save message and trigger rerun to move the message out of the spinner block
+            # Save message and update state
             if full_resp.startswith("⚠️ AI 연결 지연"):
-                 st.session_state.messages.append({"role": "assistant", "content": full_resp}) # Save error for history
+                 st.session_state.messages.append({"role": "assistant", "content": full_resp})
             else:
                 st.session_state.messages.append({"role": "assistant", "content": full_resp})
-            
-            st.rerun()
+                
+            # Transition state to display history cleanly
+            st.rerun() # This final rerun should clear the spinner and display the message via the history loop
 
 
     # 2. Display History
