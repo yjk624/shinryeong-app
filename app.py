@@ -16,23 +16,13 @@ st.set_page_config(page_title="신령 사주리포트", page_icon="🔮", layout
 UI_TEXT = {
     "ko": {
         "title": "🔮 신령 사주리포트",
-        "caption": "정통 명리학 기반 데이터 분석 시스템 v15.0 (Final)",
+        "caption": "정통 명리학 기반 데이터 분석 시스템 v15.1 (최종 완성)",
         "sidebar_title": "설정", "lang_btn": "English Mode", "reset_btn": "새로운 상담 시작",
-        "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시",
+        "input_dob": "생년월일", "input_time": "태어난 시간", "input_city": "태어난 도시 (예: 서울, 부산)",
         "input_gender": "성별", "concern_label": "당신의 고민을 구체적으로 적어주세요.",
         "submit_btn": "📜 정밀 분석 시작", "loading": "천문 데이터 계산 및 신강/신약 정밀 판별 중...",
         "warn_title": "법적 면책 조항", "warn_text": "본 분석은 통계적 참고자료입니다.",
         "placeholder": "추가 질문을 입력하세요..."
-    },
-    "en": {
-        "title": "🔮 Shinryeong Destiny Report",
-        "caption": "Authentic Saju Analysis System v15.0",
-        "sidebar_title": "Settings", "lang_btn": "한국어 모드", "reset_btn": "Reset Session",
-        "input_dob": "Date of Birth", "input_time": "Birth Time", "input_city": "Birth City",
-        "input_gender": "Gender", "concern_label": "Describe your specific concern.",
-        "submit_btn": "📜 Start Analysis", "loading": "Calculating Astral Data...",
-        "warn_title": "Legal Disclaimer", "warn_text": "Reference only.",
-        "placeholder": "Ask follow-up questions..."
     }
 }
 
@@ -45,7 +35,7 @@ if "saju_data_dict" not in st.session_state: st.session_state.saju_data_dict = {
 if "raw_input_data" not in st.session_state: st.session_state.raw_input_data = None
 
 # API Setup
-geolocator = Nominatim(user_agent="shinryeong_v15_final", timeout=10)
+geolocator = Nominatim(user_agent="shinryeong_v15_1_final", timeout=10)
 try:
     GROQ_KEY = st.secrets["GROQ_API_KEY"]
     client = Groq(api_key=GROQ_KEY)
@@ -70,6 +60,21 @@ def get_coordinates(city_input):
         loc = geolocator.geocode(city_input)
         if loc: return (loc.latitude, loc.longitude), city_input
     except: pass
+    
+    if city_input and any(c.isalpha() for c in city_input):
+        try:
+            approx_loc = geolocator.geocode(city_input + ", South Korea", timeout=3)
+            if approx_loc:
+                min_dist = float('inf')
+                nearest_coords = None
+                input_pt = (approx_loc.latitude, approx_loc.longitude)
+                for coords in CITY_DB.values():
+                    dist = great_circle(input_pt, coords).km
+                    if dist < min_dist:
+                        min_dist = dist
+                        nearest_coords = coords
+                if min_dist < 50: return nearest_coords, f"{city_input} (Nearest)"
+        except: pass
     return None, None
 
 def convert_lunar_to_solar(year, month, day, is_intercalary):
@@ -80,25 +85,24 @@ def convert_lunar_to_solar(year, month, day, is_intercalary):
     except: return None
 
 # ==========================================
-# 2. LOGIC ENGINE (v15.0 - Direct Mapping)
+# 2. LOGIC ENGINE (Direct from Saju Engine)
 # ==========================================
-def analyze_logic_v15(saju_res):
+def analyze_heavy_logic(saju_res):
     """
-    Directly analyzes the Saju result from engine.
+    Directly analyzes the Korean output from saju_engine.py
     """
-    # saju_res has keys: 'Day_Stem', 'Month_Branch', 'Full_String', 'Shinsal', etc.
-    dm = saju_res['Day_Stem']
-    season = saju_res['Month_Branch']
+    dm = saju_res['Day_Stem'] # 일간
+    season = saju_res['Month_Branch'] # 월지
     full_str = saju_res['Full_String']
     
     # 1. Elements
     elem_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
     season_map = {'인':'목','묘':'목','진':'토','사':'화','오':'화','미':'토','신':'금','유':'금','술':'토','해':'수','자':'수','축':'토'}
     
-    my_elem = elem_map[dm]
-    season_elem = season_map[season]
+    my_elem = elem_map.get(dm, '수')
+    season_elem = season_map.get(season, '화')
     
-    # 2. Supporters (My Resource & Friends)
+    # 2. Supporters
     supporters = []
     if my_elem == '목': supporters = ['수', '목']
     elif my_elem == '화': supporters = ['목', '화']
@@ -110,12 +114,11 @@ def analyze_logic_v15(saju_res):
     score = 0
     # Season Check (+50 / -50)
     if season_elem in supporters: score += 50
-    else: score -= 50 # Penalize for Sil-ryeong
+    else: score -= 50 # Penalize for Sil-ryeong (e.g. Water born in Fire month)
     
     # Pillar Check
     for char in full_str:
         if char == ' ': continue
-        # Simple element mapping for counting
         ce = '토'
         if char in "갑을인묘": ce = '목'
         elif char in "병정사오": ce = '화'
@@ -125,7 +128,6 @@ def analyze_logic_v15(saju_res):
         if ce in supporters: score += 10
         else: score -= 5
             
-    # Diagnosis
     if score >= 10: 
         strength = "신강(Strong - 주도적)" 
         advice_base = "자신의 에너지를 밖으로 표출하고 리드해야 운이 풀림."
@@ -135,7 +137,7 @@ def analyze_logic_v15(saju_res):
 
     # 4. Pattern Detection (Jae-da-sin-yak)
     wealth_map = {'목':'토', '화':'금', '토':'수', '금':'목', '수':'화'}
-    my_wealth = wealth_map[my_elem]
+    my_wealth = wealth_map.get(my_elem, '화')
     
     wealth_count = 0
     for char in full_str:
@@ -149,10 +151,9 @@ def analyze_logic_v15(saju_res):
     pattern = "일반격"
     if "신약" in strength and wealth_count >= 3:
         pattern = "재다신약(財多身弱)"
-        strength = "극신약(Very Weak)"
         advice_base = "재물 욕심은 많으나 쥘 힘이 부족함. 돈을 쫓으면 건강을 잃으니, 공부(자격증)나 사람(인맥)을 먼저 얻어야 돈이 따라옴."
     elif wealth_count >= 3:
-        pattern = "재성과다(Wealth Overload - 사업가적 기질)"
+        pattern = "재성과다(Wealth Overload)"
 
     # 5. Metaphor
     metaphor_db = {
@@ -161,7 +162,7 @@ def analyze_logic_v15(saju_res):
         '임': "바다(Strategist)", '계': "봄비(Intuitive)"
     }
     
-    # 6. Shinsal from Engine
+    # 6. Shinsal
     shinsal = ", ".join(saju_res['Shinsal']) if saju_res['Shinsal'] else "평온함"
 
     return {
@@ -171,18 +172,19 @@ def analyze_logic_v15(saju_res):
         "wealth_count": wealth_count
     }
 
-def generate_ai_response(messages, lang_mode):
-    # Persona Injection (No English Output)
+def generate_ai_response(messages, mode="report"):
+    # [FIXED] Updated signature to accept 'mode' and removed 'lang_mode'
+    # [FIXED] Removed Image Generation Instructions
+    
     sys_instruction = """
 [CRITICAL RULE] You are 'Shinryeong' (Divine Guru). Tone: Hage-che (하게체: ~하네, ~이라네).
-Language: KOREAN ONLY. No English/German words in output body.
-Format: Use the provided JSON data. 
-Visuals: Insert 
-
-[Image of Five Elements Cycle]
- when explaining balance.
+Language: KOREAN ONLY. No English/German words in output.
+Format: Use the provided JSON data to answer. Do not hallucinate generic advice.
 Task: Write a detailed report. Explain terms like '신강', '재다신약', '도화살' simply.
 """
+    if mode == "chat":
+        sys_instruction += "\n[CHAT MODE] Answer ONLY the user's specific question using the data. Do NOT repeat the birth chart or introduction."
+
     if messages[0]['role'] == 'system':
         messages[0]['content'] += f"\n{sys_instruction}"
         
@@ -190,7 +192,7 @@ Task: Write a detailed report. Explain terms like '신강', '재다신약', '도
     for model in models:
         try:
             stream = client.chat.completions.create(
-                model=model, messages=messages, temperature=0.5, max_tokens=4000
+                model=model, messages=messages, temperature=0.5, max_tokens=3500
             )
             return stream.choices[0].message.content
         except: time_module.sleep(0.5); continue
@@ -208,9 +210,9 @@ with st.sidebar:
     with st.expander("🔍 데이터 진단", expanded=False):
         st.json(st.session_state.saju_data_dict)
 
-t = UI_TEXT[st.session_state.lang]
+t = UI_TEXT["ko"] # Force Korean context
 st.title(t["title"])
-st.caption("음력/윤달 지원 & 정밀 분석 엔진 v15.0")
+st.caption("음력/윤달 지원 & 정밀 분석 엔진 v15.1")
 st.warning(f"**[{t['warn_title']}]**\n\n{t['warn_text']}")
 
 # A. Input Form
@@ -230,8 +232,7 @@ if not st.session_state.analysis_complete:
         submit = st.form_submit_button(t["submit_btn"])
     
     if submit:
-        if not city: 
-            st.error("⚠️ 도시를 입력하게.")
+        if not city: st.error("⚠️ 도시를 입력하게.")
         else:
             with st.spinner("⏳ 천기누설을 준비 중이네..."):
                 coords, city_name = get_coordinates(city)
@@ -247,8 +248,8 @@ if not st.session_state.analysis_complete:
                     saju_res = calculate_saju_v3(final_date.year, final_date.month, final_date.day, 
                                                time_val.hour, time_val.minute, coords[0], coords[1])
                     
-                    # 2. Logic (Correctly calling v15)
-                    facts = analyze_logic_v15(saju_res)
+                    # 2. Logic (Use v15.1 Logic directly on Engine Output)
+                    facts = analyze_heavy_logic(saju_res)
                     
                     st.session_state.saju_data_dict = facts
                     st.session_state.raw_input_data = {"date": str(final_date), "concern": concern}
