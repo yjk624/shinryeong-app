@@ -21,9 +21,8 @@ OHENG_MAP = {
 }
 
 def get_location_info(city_name):
-    """도시 이름으로 위도, 경도, 타임존 찾기"""
     try:
-        geolocator = Nominatim(user_agent="shinryeong_app_v2")
+        geolocator = Nominatim(user_agent="shinryeong_app_v3")
         location = geolocator.geocode(city_name)
         if not location: return None
         tf = TimezoneFinder()
@@ -35,7 +34,6 @@ def calculate_true_solar_time(birth_dt, lat, lon, timezone_str):
     local_tz = pytz.timezone(timezone_str)
     try: dt_aware = local_tz.localize(birth_dt)
     except ValueError: dt_aware = birth_dt.astimezone(local_tz)
-    
     offset = dt_aware.utcoffset().total_seconds() / 3600
     standard_meridian = offset * 15 
     diff_deg = lon - standard_meridian
@@ -44,16 +42,14 @@ def calculate_true_solar_time(birth_dt, lat, lon, timezone_str):
 
 def calculate_saju_pillars(dt):
     y = dt.year
-    # 입춘 기준 간략 보정
     if dt.month < 2 or (dt.month == 2 and dt.day < 4): year_ganji_idx = (y - 1 - 4) % 60
     else: year_ganji_idx = (y - 4) % 60
-        
     year_stem = CHEONGAN[year_ganji_idx % 10]
     year_branch = JIJI[year_ganji_idx % 12]
     
     month_base_idx = (year_ganji_idx % 10 % 5) * 2 + 2
     month_branch_idx = (dt.month + 10) % 12
-    if dt.day < 5: month_branch_idx = (month_branch_idx - 1) % 12 # 절기 약식 보정
+    if dt.day < 5: month_branch_idx = (month_branch_idx - 1) % 12
     month_stem = CHEONGAN[(month_base_idx + (month_branch_idx - 2)) % 10]
     month_branch = JIJI[month_branch_idx]
 
@@ -69,24 +65,15 @@ def calculate_saju_pillars(dt):
     hour_stem = CHEONGAN[(hour_base_idx + hour_branch_idx) % 10]
     hour_branch = JIJI[hour_branch_idx % 12]
 
-    pillars = {
-        'year': f"{year_stem}{year_branch}", 
-        'month': f"{month_stem}{month_branch}", 
-        'day': f"{day_stem}{day_branch}", 
-        'time': f"{hour_stem}{hour_branch}"
-    }
-    
+    pillars = {'year': f"{year_stem}{year_branch}", 'month': f"{month_stem}{month_branch}", 'day': f"{day_stem}{day_branch}", 'time': f"{hour_stem}{hour_branch}"}
     counts = {'목':0, '화':0, '토':0, '금':0, '수':0}
     for char in [year_stem, year_branch, month_stem, month_branch, day_stem, day_branch, hour_stem, hour_branch]:
         if char in OHENG_MAP: counts[OHENG_MAP[char]] += 1
             
     return {
         'ganji_text': f"{year_stem}{year_branch}년 {month_stem}{month_branch}월 {day_stem}{day_branch}일 {hour_stem}{hour_branch}시",
-        'pillars': pillars,
-        'day_stem': day_stem,
-        'day_elem': OHENG_MAP[day_stem],
-        'five_elem_counts': counts,
-        'true_solar_time': dt.strftime("%Y-%m-%d %H:%M")
+        'pillars': pillars, 'day_stem': day_stem, 'day_elem': OHENG_MAP[day_stem],
+        'five_elem_counts': counts, 'true_solar_time': dt.strftime("%Y-%m-%d %H:%M")
     }
 
 # ==========================================
@@ -98,7 +85,6 @@ class SajuDB:
         self.db_folder = os.path.join(current_dir, "saju_db")
         self.load_status = {}
         
-        # 각 파일 로드
         self.glossary = self.load_csv('saju_glossary_v2.csv')
         self.five_elements = self.load_json('five_elements_matrix.json')
         self.timeline = self.load_json('timeline_db.json')
@@ -116,7 +102,7 @@ class SajuDB:
                 self.load_status[filename] = "✅ Loaded"
                 return json.load(f)
         except Exception as e:
-            self.load_status[filename] = f"❌ {e}"
+            self.load_status[filename] = f"❌ Error: {e}"
             return {}
 
     def load_csv(self, filename):
@@ -126,30 +112,45 @@ class SajuDB:
             self.load_status[filename] = "✅ Loaded"
             return df
         except Exception as e:
-            self.load_status[filename] = f"❌ {e}"
+            self.load_status[filename] = f"❌ Error: {e}"
             return pd.DataFrame()
 
 db = SajuDB()
 
 # ==========================================
-# 3. 유연한 검색 엔진 (Fuzzy Match Engine) [핵심 수정]
+# 3. 유연한 검색 엔진 (Smart Match Engine)
 # ==========================================
 def find_in_db(data_dict, keyword):
-    """
-    JSON 키가 정확히 일치하지 않아도(예: '금' vs '금(Metal)') 
-    키워드가 포함되어 있으면 데이터를 반환하는 함수
-    """
+    """키워드가 포함된 키의 값을 반환 (Fuzzy Match)"""
     if not isinstance(data_dict, dict): return None
-    
-    # 1. 정확 일치 시도
     if keyword in data_dict: return data_dict[keyword]
-    
-    # 2. 부분 일치 시도 (Loop)
-    for key, value in data_dict.items():
-        if keyword in key: # 예: "금" in "금(Metal)" -> True
-            return value
-            
+    for k, v in data_dict.items():
+        if keyword in k: return v
     return None
+
+def _get_data_safe(db_source, primary_key, fallback_keys=[]):
+    """
+    DB에서 데이터를 꺼낼 때, 키가 없으면 대체 키를 찾거나
+    아예 루트(Root)에서 찾아보는 안전 함수
+    """
+    # 1. Primary Key 시도 (예: imbalance_analysis)
+    if primary_key in db_source:
+        return db_source[primary_key]
+    
+    # 2. Fallback Keys 시도 (예: imbalance_matrix)
+    for k in fallback_keys:
+        if k in db_source:
+            return db_source[k]
+            
+    # 3. 못 찾았으면 혹시 Root 자체가 데이터인가? (예: 목(Wood) 키가 바로 있는지 확인)
+    # 샘플 키워드('목' or '갑' 등)가 있는지 확인해보고 맞으면 통째로 반환
+    sample_keys = ['목', '화', '토', '금', '수', 'Wood', 'Fire', '비겁', '식상', '2026', '2025']
+    for k in db_source.keys():
+        for sample in sample_keys:
+            if sample in k:
+                return db_source # 상자 없이 내용물이 바로 있는 경우
+                
+    return {} # 정말 없음
 
 def analyze_saju_precision(user_data):
     # 1. 시각 계산
@@ -165,15 +166,17 @@ def analyze_saju_precision(user_data):
     report = {"saju": saju, "analytics": [], "chat_context": []}
     counts = saju['five_elem_counts']
     
-    # [분석 1] 오행 과다/고립
-    has_imbalance = False
-    imbalance_db = db.five_elements.get('imbalance_analysis', {})
+    # [분석 1] 오행 과다/고립 (Data Loading 보정 적용)
+    # 상자 이름이 imbalance_analysis인지, imbalance_matrix인지, 아니면 없는지 확인
+    imbalance_db = _get_data_safe(db.five_elements, 'imbalance_analysis', ['imbalance_matrix', 'patterns'])
     
-    for elem, count in counts.items(): # 목, 화, 토, 금, 수
-        found_data = find_in_db(imbalance_db, elem) # "금"으로 "금(Metal)" 찾기 시도
+    has_imbalance = False
+    for elem, count in counts.items():
+        found_data = find_in_db(imbalance_db, elem) # "금"으로 "금(Metal)" 찾기
         
         if found_data:
             data = None
+            tag = ""
             if count >= 3:
                 data = found_data.get('excess')
                 tag = "과다"
@@ -184,8 +187,8 @@ def analyze_saju_precision(user_data):
             if data:
                 report['analytics'].append({
                     "type": f"⚠️ 기질 분석 ({tag})",
-                    "title": data.get('title', f'{elem} 기운 불균형'),
-                    "content": data.get('shamanic_voice', '기운이 치우쳐 있어 조심해야 하네.')
+                    "title": data.get('title', f'{elem} 기운 {tag}'),
+                    "content": data.get('shamanic_voice', '기운이 치우쳐 있어.')
                 })
                 report['chat_context'].append(f"{elem} {tag}")
                 has_imbalance = True
@@ -193,39 +196,38 @@ def analyze_saju_precision(user_data):
     if not has_imbalance:
         report['analytics'].append({"type": "⚖️ 오행의 조화", "title": "오행이 골고루 갖춰진 귀격", "content": "치우침 없이 원만한 성품일세."})
 
-    # [분석 2] 직업 (Career) - career_db.json
-    strongest = max(counts, key=counts.get) # 가장 강한 오행
-    
-    # 오행 -> 십성 매핑 (약식)
+    # [분석 2] 직업 (Career) - Data Loading 보정
+    strongest = max(counts, key=counts.get)
     trait_map = {'목':'식상', '화':'재성', '토':'비겁', '금':'관성', '수':'인성'}
-    keyword = trait_map.get(strongest, '식상') # 예: '관성'
+    keyword = trait_map.get(strongest, '식상')
     
-    career_db = db.career.get('modern_jobs', {})
-    job_data = find_in_db(career_db, keyword) # "관성"으로 "관성_발달(Official...)" 찾기
+    # career_db에서 modern_jobs 키가 없어도 찾도록 보정
+    career_data_source = _get_data_safe(db.career, 'modern_jobs', ['jobs', 'career_list'])
+    job_data = find_in_db(career_data_source, keyword)
     
     if job_data:
         report['analytics'].append({
             "type": "💼 신령의 천직 추천",
             "title": f"'{strongest}' 기운을 쓰는 일",
-            "content": f"**[성향]** {job_data.get('trait')}\n\n**[추천]** {job_data.get('jobs')}\n\n📢 {job_data.get('shamanic_voice')}"
+            "content": f"**[성향]** {job_data.get('trait', '')}\n\n**[추천]** {job_data.get('jobs', '')}\n\n📢 {job_data.get('shamanic_voice', '')}"
         })
     else:
-        # DB 매칭 실패 시 기본 멘트
+        # Fallback
         report['analytics'].append({
-            "type": "💼 직업 조언",
-            "title": "자신만의 길을 찾게",
-            "content": f"{strongest} 기운이 강하니 이를 활용하는 쪽으로 나가면 대성할 것일세."
+             "type": "💼 신령의 천직 추천",
+             "title": f"'{strongest}' 기운 활용",
+             "content": "데이터베이스 연결이 원활하지 않으나, 자네의 강점을 살리는 전문직이나 사업이 어울리네."
         })
 
     # [분석 3] 2026년 예언 (Timeline)
-    future_db = db.timeline.get('future_flow_db', {})
-    year_data = find_in_db(future_db, "2026") # "2026" 키워드로 찾기
+    future_source = _get_data_safe(db.timeline, 'future_flow_db', ['timeline', 'yearly_flow'])
+    year_data = find_in_db(future_source, "2026")
     
     if year_data:
         report['analytics'].append({
             "type": "🔮 2026년 병오년 예언",
-            "title": year_data.get('year_title', '2026년 운세'),
-            "content": f"{year_data.get('summary')}\n\n**[여름 경고]** {year_data.get('Q2_Summer', {}).get('shamanic_warning')}"
+            "title": year_data.get('year_title', '내년 운세'),
+            "content": f"{year_data.get('summary', '')}\n\n**[여름 경고]** {year_data.get('Q2_Summer', {}).get('shamanic_warning', '매사 조심하게.')}"
         })
 
     return report
@@ -234,32 +236,26 @@ def analyze_compatibility_precision(user_a, user_b):
     res_a = analyze_saju_precision(user_a)
     res_b = analyze_saju_precision(user_b)
     
-    saju_a = res_a['saju']
-    saju_b = res_b['saju']
-    
     report = {
-        "saju_a": saju_a, "saju_b": saju_b,
+        "saju_a": res_a['saju'], "saju_b": res_b['saju'],
         "analytics": [],
         "chat_context": res_a['chat_context'] + res_b['chat_context']
     }
     
-    # 일간 궁합
-    stem_a = saju_a['day_elem']
-    stem_b = saju_b['day_elem']
+    # 속궁합
+    stem_a = res_a['saju']['day_elem']
+    stem_b = res_b['saju']['day_elem']
     
-    comp_db = db.love.get('basic_compatibility', {}).get('element_harmony', {})
+    # love_db 로딩 보정
+    comp_db = _get_data_safe(db.love, 'basic_compatibility', ['compatibility'])
+    if 'element_harmony' in comp_db: comp_db = comp_db['element_harmony']
     
-    # 1. 정확 매칭 시도
     eng_map = {'목':'wood', '화':'fire', '토':'earth', '금':'metal', '수':'water'}
-    ea, eb = eng_map[stem_a], eng_map[stem_b]
-    
-    key1 = f"{ea}_{eb}" # wood_fire
-    key2 = f"{eb}_{ea}"
+    key1 = f"{eng_map[stem_a]}_{eng_map[stem_b]}"
+    key2 = f"{eng_map[stem_b]}_{eng_map[stem_a]}"
     
     comp_text = comp_db.get(key1, comp_db.get(key2, ""))
-    
-    if not comp_text:
-        comp_text = f"서로 {stem_a}와 {stem_b}의 기운을 가졌네. 서로 다르지만 맞춰가면 좋은 인연일세."
+    if not comp_text: comp_text = "서로 맞춰가는 평범한 인연일세."
 
     report['analytics'].append({
         "type": "💞 속궁합 분석",
@@ -267,15 +263,20 @@ def analyze_compatibility_precision(user_a, user_b):
         "content": comp_text
     })
     
-    # 갈등 트리거 (랜덤)
-    triggers = list(db.love.get('conflict_triggers', {}).values())
-    if triggers:
-        warn = random.choice(triggers)
-        report['analytics'].append({
-            "type": "⚡ 이별 주의보",
-            "title": "싸움의 원인?",
-            "content": f"**[이유]** {warn.get('fight_reason')}\n\n📢 {warn.get('shamanic_voice')}"
-        })
+    # 갈등 원인
+    conflict_db = _get_data_safe(db.love, 'conflict_triggers', ['triggers'])
+    if conflict_db:
+        # dict values list로 변환
+        triggers = list(conflict_db.values())
+        if triggers:
+            warn = triggers[0] # 랜덤 대신 첫번째 or 랜덤
+            import random
+            warn = random.choice(triggers)
+            report['analytics'].append({
+                "type": "⚡ 이별 주의보",
+                "title": "싸움의 원인",
+                "content": f"**[이유]** {warn.get('fight_reason')}\n\n📢 {warn.get('shamanic_voice')}"
+            })
 
     return report
 
