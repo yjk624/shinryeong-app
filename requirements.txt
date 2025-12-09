@@ -1,7 +1,9 @@
 streamlit
-groq
+pandas
 ephem
 geopy
+pytz
+timezonefinder
 gspread
 oauth2client
-korean_lunar_calendar
+google-auth
