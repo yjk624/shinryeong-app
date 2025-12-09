@@ -22,15 +22,32 @@ if "logs" not in st.session_state: st.session_state.logs = []
 @st.cache_data
 def load_databases():
     db = {}
+    
+    # 1. 현재 app.py가 있는 절대 경로를 찾음
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    # 2. saju_db 폴더의 절대 경로 생성
+    db_folder = os.path.join(current_dir, "saju_db")
+
     try:
-        # Load all 4 core databases
-        with open("saju_db/identity_db.json", "r", encoding='utf-8') as f: db['identity'] = json.load(f)
-        with open("saju_db/compatibility_db.json", "r", encoding='utf-8') as f: db['compatibility'] = json.load(f)
-        with open("saju_db/five_elements_matrix.json", "r", encoding='utf-8') as f: db['matrix'] = json.load(f)
-        with open("saju_db/shinsal_db.json", "r", encoding='utf-8') as f: db['shinsal'] = json.load(f)
+        # 각 파일별 절대 경로로 로딩
+        with open(os.path.join(db_folder, "identity_db.json"), "r", encoding='utf-8') as f: 
+            db['identity'] = json.load(f)
+        with open(os.path.join(db_folder, "compatibility_db.json"), "r", encoding='utf-8') as f: 
+            db['compatibility'] = json.load(f)
+        with open(os.path.join(db_folder, "five_elements_matrix.json"), "r", encoding='utf-8') as f: 
+            db['matrix'] = json.load(f)
+        with open(os.path.join(db_folder, "shinsal_db.json"), "r", encoding='utf-8') as f: 
+            db['shinsal'] = json.load(f)
+            
         return db
-    except FileNotFoundError:
-        st.error("🚨 데이터베이스 파일이 누락되었습니다. saju_db 폴더에 json 파일들을 확인해주세요.")
+        
+    except FileNotFoundError as e:
+        st.error(f"🚨 파일 로딩 실패: {e}")
+        # [디버깅용] 실제 폴더에 무슨 파일이 있는지 화면에 출력
+        if os.path.exists(db_folder):
+            st.warning(f"📂 '{db_folder}' 폴더 내 파일 목록: {os.listdir(db_folder)}")
+        else:
+            st.error(f"❌ '{db_folder}' 폴더를 찾을 수 없습니다. 경로를 확인하세요.")
         return None
 
 DB = load_databases()
