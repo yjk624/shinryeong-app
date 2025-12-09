@@ -1,0 +1,14 @@
+# --- 신령의 보안 부적 ---
+# 이 파일들에 적힌 것은 GitHub에 절대 올라가지 않는다.
+
+# 1. API 키가 들어있는 비밀 금고
+.streamlit/secrets.toml
+
+# 2. 구글 시트 접속용 열쇠 (JSON 파일)
+service_account.json
+
+# 3. 기타 불필요한 파일들
+__pycache__/
+*.pyc
+.env
+.DS_Store
