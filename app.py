@@ -3,46 +3,62 @@ from groq import Groq
 from saju_engine import calculate_saju_v3
 from datetime import datetime, time
 import json
+import os
 import pandas as pd
 from korean_lunar_calendar import KoreanLunarCalendar
 from geopy.geocoders import Nominatim
 from geopy.distance import great_circle
 
 # ==========================================
-# 0. STYLE & CONFIG (UI 설정)
+# 0. CONFIG & STYLE (UI 설정)
 # ==========================================
-st.set_page_config(page_title="신령: 귀신같은 운명 분석", page_icon="🔮", layout="centered")
+st.set_page_config(page_title="신령: 운명 분석", page_icon="🔮", layout="centered")
 
-# Custom CSS for Mystical UI
 st.markdown("""
 <style>
-    .main-title { font-size: 2.5rem !important; font-weight: 800; color: #4A148C; text-align: center; margin-bottom: 0px; }
-    .sub-title { font-size: 1.2rem !important; color: #6D6D6D; text-align: center; margin-bottom: 30px; }
-    .section-header { font-size: 1.4rem !important; font-weight: 600; color: #311B92; border-bottom: 2px solid #D1C4E9; padding-bottom: 5px; margin-top: 25px; margin-bottom: 15px; }
-    .highlight-box { background-color: #F3E5F5; padding: 15px; border-radius: 10px; border-left: 5px solid #8E24AA; margin-bottom: 10px; }
-    .stAlert { margin-top: 10px; }
+    .main-title { font-size: 2.2rem !important; font-weight: 800; color: #4A148C; text-align: center; margin-bottom: 5px; }
+    .sub-title { font-size: 1.0rem !important; color: #6D6D6D; text-align: center; margin-bottom: 20px; }
+    h3 { font-size: 1.3rem !important; font-weight: 700; color: #311B92; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-top: 20px; }
+    .stAlert { padding: 10px !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# State Initialization
+# Initialize State
 if "lang" not in st.session_state: st.session_state.lang = "ko"
 if "family_members" not in st.session_state: st.session_state.family_members = []
 if "saju_data_dict" not in st.session_state: st.session_state.saju_data_dict = {} 
 
 # ==========================================
-# 1. DATABASE LOADING (Robust)
+# 1. DATABASE LOADING (ROBUST)
 # ==========================================
 @st.cache_data
 def load_databases():
-    db = {}
-    files = ['identity', 'career', 'love', 'health', 'timeline', 'shinsal', 'compatibility', 'five_elements_matrix']
-    for name in files:
+    """Loads JSON DBs with explicit error handling."""
+    db = {
+        'identity': {}, 'career': {}, 'love': {}, 'health': {}, 
+        'timeline': {}, 'shinsal': {}, 'compatibility': {}, 'matrix': {}
+    }
+    
+    # File mapping (Correct filename vs DB Key)
+    file_map = {
+        'identity': 'identity_db.json',
+        'career': 'career_db.json',
+        'love': 'love_db.json',
+        'health': 'health_db.json',
+        'timeline': 'timeline_db.json',
+        'shinsal': 'shinsal_db.json',
+        'compatibility': 'compatibility_db.json',
+        'matrix': 'five_elements_matrix.json'
+    }
+    
+    for key, filename in file_map.items():
         try:
-            fname = "five_elements_matrix" if name == "matrix" else name
-            path = f"saju_db/{fname}_db.json" if 'db' not in fname and fname != 'five_elements_matrix' else f"saju_db/{fname}.json"
-            with open(path, "r", encoding='utf-8') as f: db[name] = json.load(f)
-        except Exception: 
-            db[name] = {} # 빈 딕셔너리로 초기화하여 에러 방지
+            with open(f"saju_db/{filename}", "r", encoding='utf-8') as f:
+                db[key] = json.load(f)
+        except FileNotFoundError:
+            # Fallback for missing files to prevent KeyError
+            pass 
+            
     return db
 
 DB = load_databases()
@@ -59,7 +75,8 @@ except: client = None
 CITY_DB = {
     "서울": (37.56, 126.97), "부산": (35.17, 129.07), "인천": (37.45, 126.70), 
     "대구": (35.87, 128.60), "창원": (35.22, 128.68), "광주": (35.15, 126.85),
-    "대전": (36.35, 127.38), "울산": (35.53, 129.31), "제주": (33.49, 126.53)
+    "대전": (36.35, 127.38), "울산": (35.53, 129.31), "제주": (33.49, 126.53),
+    "seoul": (37.56, 126.97), "busan": (35.17, 129.07)
 }
 
 def get_coordinates(city_input):
@@ -72,7 +89,6 @@ def get_coordinates(city_input):
     return CITY_DB["서울"] # Fallback
 
 def get_saju_data(dob, tm, is_lunar, is_intercalary, city="서울"):
-    """사주 계산 및 기본 데이터 추출"""
     coords = get_coordinates(city)
     final_date = dob
     if is_lunar:
@@ -85,10 +101,21 @@ def get_saju_data(dob, tm, is_lunar, is_intercalary, city="서울"):
     raw = calculate_saju_v3(final_date.year, final_date.month, final_date.day, 
                           tm.hour, tm.minute, coords[0], coords[1])
     
-    # [Logic] Identify Strength & Pattern
+    # Identify Strength & Pattern
     dm = raw['Day_Stem']
     e_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
     my_elem = e_map.get(dm, '수')
+    
+    # Calculate Element Counts (For Health)
+    counts = {'목':0, '화':0, '토':0, '금':0, '수':0}
+    for char in raw['Full_String']:
+        if char in "갑을인묘": counts['목']+=1
+        elif char in "병정사오": counts['화']+=1
+        elif char in "무기진술축미": counts['토']+=1
+        elif char in "경신신유": counts['금']+=1
+        elif char in "임계해자": counts['수']+=1
+        
+    weakest_elem = min(counts, key=counts.get)
     
     # Strength Calculation
     supporters = {'목':['수','목'], '화':['목','화'], '토':['화','토'], '금':['토','금'], '수':['금','수']}[my_elem]
@@ -97,11 +124,11 @@ def get_saju_data(dob, tm, is_lunar, is_intercalary, city="서울"):
     
     score = 50 if season_elem in supporters else -50
     for char in raw['Full_String']:
+        ce = '토'
         if char in "갑을인묘": ce='목'
         elif char in "병정사오": ce='화'
         elif char in "경신신유": ce='금'
         elif char in "임계해자": ce='수'
-        else: ce='토'
         if ce in supporters: score += 10
             
     strength = "신강" if score >= 20 else "신약"
@@ -126,11 +153,11 @@ def get_saju_data(dob, tm, is_lunar, is_intercalary, city="서울"):
         "raw": raw, "day_stem": dm, "full_str": raw['Full_String'],
         "id_key": id_key, "strength": strength, "pattern": pattern,
         "my_elem": my_elem, "birth_year": final_date.year,
-        "shinsal": raw['Shinsal'], "season": season
+        "shinsal": raw['Shinsal'], "season": season,
+        "weakest": weakest_elem
     }
 
 def get_timeline_narrative(birth_year, ten_god_pattern="비겁운"):
-    """생애주기 스토리텔링"""
     current_year = datetime.now().year
     age = current_year - birth_year + 1
     narrative = []
@@ -140,68 +167,69 @@ def get_timeline_narrative(birth_year, ten_god_pattern="비겁운"):
     
     if age > 15:
         txt = impacts.get('middle_school', {}).get(ten_god_pattern, "평범한 학창시절") 
-        narrative.append(f"- **10대 성장기:** {txt}")
+        narrative.append(f"**[10대 성장기]**: {txt}")
     if age > 20:
         txt = impacts.get('university', {}).get(ten_god_pattern, "자유로운 탐색기")
-        narrative.append(f"- **20대 청춘:** {txt}")
+        narrative.append(f"**[20대 청춘]**: {txt}")
     if age > 30:
         txt = impacts.get('settlement', {}).get(ten_god_pattern, "기반 구축기")
-        narrative.append(f"- **30대 정착기:** {txt}")
+        narrative.append(f"**[30대 정착기]**: {txt}")
         
-    return "\n".join(narrative)
+    return "\n\n".join(narrative)
 
 def generate_report(data):
-    """AI 보고서 생성기 (DB 데이터 조립)"""
     if not client: return "AI 연결 불가. 데이터만 확인하세요."
     
-    # 1. Identity Data
+    # 1. Identity
     id_data = DB['identity'].get(data['id_key'], {"ko": f"{data['day_stem']} 일간 데이터 없음"})
     
-    # 2. Career & Wealth Data
-    ten_god_key = "편재" # Simplified for demo (should be calculated)
-    career_info = DB['career']['ten_gods'].get(ten_god_key, {})
-    work_style = DB['career']['work_style'].get(data['strength'], {})
+    # 2. Career
+    ten_god_key = "편재" 
+    career_info = DB['career'].get('ten_gods', {}).get(ten_god_key, {})
+    work_style = DB['career'].get('work_style', {}).get(data['strength'], {})
     
-    # 3. Love Data
+    # 3. Love
     love_key = f"{data['my_elem']}_{data['strength']}"
-    love_info = DB['love']['sexual_style'].get(love_key, {})
+    love_info = DB['love'].get('sexual_style', {}).get(love_key, {})
     
-    # 4. Health Data
-    # Find weakest element (Simplified)
-    health_info = DB['health']['element_diagnosis'].get('수', {}) # Defaulting to Water for demo
+    # 4. Health (CRITICAL FIX: Explicit Mapping)
+    weak_e = data['weakest'] 
+    health_basic = DB['health'].get('element_diagnosis', {}).get(weak_e, {})
+    health_remedy = DB['health'].get('remedy', {}).get(weak_e, {})
     
-    # 5. Forecast (2025/2026)
-    y25 = DB['timeline']['yearly_2025_2026'].get(data['day_stem'], {}).get('2025', '데이터 없음')
-    y26 = DB['timeline']['yearly_2025_2026'].get(data['day_stem'], {}).get('2026', '데이터 없음')
+    health_text = f"약한 오행: {weak_e}, 증상: {health_basic.get('weak_symptom','')}, 추천 음식: {health_remedy.get('food','')}"
     
-    # 6. Special Advice (Pattern)
+    # 5. Forecast
+    y25 = DB['timeline'].get('yearly_2025_2026', {}).get(data['day_stem'], {}).get('2025', '2025년 운세 데이터 없음')
+    y26 = DB['timeline'].get('yearly_2025_2026', {}).get(data['day_stem'], {}).get('2026', '2026년 운세 데이터 없음')
+    
+    # 6. Advice
     special_advice = "균형을 맞추며 정진하게."
     if data['pattern'] == "재다신약":
-        special_advice = DB['career']['special_advice']['재다신약']['solution']
+        special_advice = DB['career'].get('special_advice', {}).get('재다신약', {}).get('solution', special_advice)
 
-    # AI Prompt Construction
+    # Prompt Engineering
     sys_msg = """
-    [ROLE] 'Shinryeong' (Divine Guru). Tone: Mystical & Authoritative Korean (하게체).
+    [ROLE] You are 'Shinryeong' (Divine Guru). Tone: Mystical & Authoritative Korean (하게체).
     [RULE] 
     1. KOREAN ONLY. No English output.
-    2. Use the provided [FACTS] to construct a coherent story. Do NOT invent new facts.
-    3. Structure the report clearly with the provided headers.
+    2. DATA-DRIVEN: Use the provided [FACTS] to write the report. Do NOT invent general advice.
+    3. FORMAT: Use clear headers with emojis.
     """
     
     user_msg = f"""
     [FACTS TO INTERPRET]
-    1. Identity: {id_data.get('ko', '')} (Metaphor)
-    2. Strength: {data['strength']} ({work_style.get('desc', '')})
-    3. Pattern: {data['pattern']} (Advice: {special_advice})
-    4. Past Life: {data['timeline_txt']}
-    5. Career: {career_info.get('desc', '')} (Strategy: {career_info.get('wealth_strategy', '')})
-    6. Love Style: {love_info.get('desc', '')} - {love_info.get('detail', '')}
-    7. Future (2025-26): 
-       - 2025: {y25}
-       - 2026: {y26}
-    8. Shinsal: {', '.join(data['shinsal'])}
-
-    [TASK] Write a comprehensive destiny report based on these facts.
+    1. 🐅 본질(Identity): {id_data.get('ko', '')} (Metaphor)
+    2. 💪 에너지(Energy): {data['strength']} - {work_style.get('desc', '')}
+    3. 💰 직업/재물(Career): {career_info.get('wealth_strategy', '')}
+    4. 💖 연애/성향(Love): {love_info.get('desc', '')} - {love_info.get('detail', '')}
+    5. 💊 건강(Health): {health_text}
+    6. ☁️ 미래(Future): 
+       - 2025(을사): {y25}
+       - 2026(병오): {y26}
+    7. ⚡ 처방(Solution): {special_advice}
+    
+    [TASK] 위 팩트들을 자연스럽게 연결하여 '신령의 운명 보고서'를 작성하게. 건강 부분은 구체적인 음식과 운동을 꼭 언급하게.
     """
     
     try:
@@ -212,11 +240,11 @@ def generate_report(data):
         )
         return resp.choices[0].message.content
     except: return "신령이 깊은 명상 중이네. 잠시 후 다시 시도하게."
-# ==========================================
+    # ==========================================
 # 3. MAIN UI LAYOUT
 # ==========================================
 st.markdown('<p class="main-title">🔮 신령(神靈)</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-title">데이터로 보는 나의 운명 (v21.0 Final)</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">데이터로 보는 나의 운명 (v22.0 Final)</p>', unsafe_allow_html=True)
 
 tab1, tab2, tab3 = st.tabs(["👤 종합 정밀 진단", "💞 궁합 분석", "👨‍👩‍👧‍👦 가족/그룹 분석"])
 
@@ -224,6 +252,7 @@ tab1, tab2, tab3 = st.tabs(["👤 종합 정밀 진단", "💞 궁합 분석", "
 with tab1:
     with st.expander("📝 사주 정보 입력", expanded=True):
         c1, c2 = st.columns(2)
+        # [FIX] Date range explicit 1900-2100
         p_date = c1.date_input("생년월일", value=datetime(1990,1,1), min_value=datetime(1900,1,1), max_value=datetime(2100,12,31))
         p_time = c1.time_input("태어난 시간", value=time(12,0))
         p_city = c2.text_input("태어난 도시", "서울")
@@ -246,8 +275,8 @@ with tab1:
         
         k1, k2, k3 = st.columns(3)
         k1.metric("일주 (Identity)", f"{res['day_stem']} (Day)")
-        k2.metric("에너지 (Energy)", res['strength'])
-        k3.metric("격국 (Pattern)", res['pattern'])
+        k2.metric("에너지 (Strength)", res['strength'])
+        k3.metric("부족한 기운 (Weak)", res['weakest'])
         
         st.markdown(st.session_state.final_report)
         
@@ -256,23 +285,28 @@ with tab1:
             with st.expander("⚡ 발견된 특수 기운 (신살) 상세 보기"):
                 for sal in res['shinsal']:
                     s_key = sal.split("(")[0]
-                    info = DB['shinsal']['basic_shinsal'].get(s_key, {})
+                    # [FIX] Safe DB Lookup
+                    info = DB['shinsal'].get(s_key, {})
+                    if not info and 'basic_shinsal' in DB['shinsal']: 
+                         info = DB['shinsal']['basic_shinsal'].get(s_key, {})
+                    
                     if info:
                         st.markdown(f"**🔹 {sal}**")
-                        st.write(f"- {info['desc']}")
-                        st.caption(f"💡 개운법: {info['remedy']}")
+                        st.write(f"- {info.get('desc','')}")
+                        st.caption(f"💡 개운법: {info.get('remedy','')}")
 
 # --- TAB 2: COMPATIBILITY ---
 with tab2:
     st.markdown('<p class="section-header">💞 궁합 진단</p>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
+    # [FIX] Date range applied
     with c1:
         st.info("🅰️ 본인")
-        a_date = st.date_input("생일", value=datetime(1990,1,1), key="a_d", min_value=datetime(1900,1,1))
+        a_date = st.date_input("생일", value=datetime(1990,1,1), key="a_d", min_value=datetime(1900,1,1), max_value=datetime(2100,12,31))
         a_time = st.time_input("시간", value=time(12,0), key="a_t")
     with c2:
         st.info("🅱️ 상대방")
-        b_date = st.date_input("생일", value=datetime(1992,1,1), key="b_d", min_value=datetime(1900,1,1))
+        b_date = st.date_input("생일", value=datetime(1992,1,1), key="b_d", min_value=datetime(1900,1,1), max_value=datetime(2100,12,31))
         b_time = st.time_input("시간", value=time(12,0), key="b_t")
 
     if st.button("궁합 분석 시작"):
@@ -290,7 +324,7 @@ with tab2:
                 score = info.get('score', 60)
                 st.progress(score)
                 st.markdown(f"<h3 style='text-align: center; color: #E91E63;'>궁합 점수: {score}점</h3>", unsafe_allow_html=True)
-                st.success(f"**관계의 본질:** {info['ko_relation']}")
+                st.success(f"**관계의 본질:** {info.get('ko_relation', '정보 없음')}")
             else:
                 st.warning("데이터베이스에 없는 조합입니다. 기본 오행 궁합으로 분석합니다.")
 
@@ -301,7 +335,8 @@ with tab3:
     with st.form("fam_form"):
         c1, c2, c3 = st.columns([1.5, 1.5, 1])
         fn = c1.text_input("이름/호칭")
-        fd = c2.date_input("생년월일", min_value=datetime(1900,1,1))
+        # [FIX] Date Range
+        fd = c2.date_input("생년월일", min_value=datetime(1900,1,1), max_value=datetime(2100,12,31))
         ft = c3.time_input("시간", value=time(12,0))
         add = st.form_submit_button("구성원 추가")
         
@@ -319,11 +354,10 @@ with tab3:
             for m in st.session_state.family_members:
                 res = get_saju_data(m['date'], m['time'], False, False)
                 e_map = {'갑':'목','을':'목','병':'화','정':'화','무':'토','기':'토','경':'금','신':'금','임':'수','계':'수'}
-                elem = e_map[res['day_stem']]
+                elem = e_map.get(res['day_stem'], '토')
                 fam_res.append({'name':m['name'], 'elem':elem, 'stem':res['day_stem'], 'full':res['full_str']})
             
             st.markdown("### 🧬 관계 매트릭스")
-            cols = st.columns(2)
             
             order = ['목','화','토','금','수']
             for i in range(len(fam_res)):
@@ -331,12 +365,15 @@ with tab3:
                     p1 = fam_res[i]
                     p2 = fam_res[j]
                     
-                    i1, i2 = order.index(p1['elem']), order.index(p2['elem'])
+                    try:
+                        i1, i2 = order.index(p1['elem']), order.index(p2['elem'])
+                    except: continue 
+                    
                     rel_type = "비견 (친구)"
                     desc = "서로 대등한 관계"
-                    
-                    # Determine relationship type
                     key = None
+
+                    # Matrix Logic
                     if (i1+1)%5 == i2: 
                         rel_type = f"{p1['elem']}생{p2['elem']} (도움)"
                         key = f"{p1['elem']}_생_{p2['elem']}"
@@ -351,7 +388,7 @@ with tab3:
                         key = f"{p2['elem']}_극_{p1['elem']}"
                     
                     if key and key in DB['matrix']:
-                         desc = DB['matrix'][key]['role_parent_child']
+                         desc = DB['matrix'][key].get('role_parent_child', desc)
 
                     with st.container():
                         st.info(f"**{p1['name']}** vs **{p2['name']}**: {rel_type}")
