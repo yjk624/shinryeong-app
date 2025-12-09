@@ -7,12 +7,20 @@ from datetime import datetime
 import os
 import random
 import saju_engine 
-
+# [진단용 코드 - 확인 후 삭제하세요]
+import os
+st.write("📂 현재 위치:", os.getcwd())
+db_path = "saju_db"
+if os.path.exists(db_path):
+    st.success(f"✅ '{db_path}' 폴더를 찾았습니다!")
+    files = os.listdir(db_path)
+    st.write(f"📄 폴더 내 파일 목록 ({len(files)}개):", files)
+else:
+    st.error(f"❌ '{db_path}' 폴더가 없습니다! JSON 파일들을 이 이름의 폴더 안에 넣으세요.")
 # ==========================================
 # 0. 설정 & 스타일
 # ==========================================
 st.set_page_config(page_title="신령: AI 점술가", page_icon="🧿", layout="centered")
-
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: #e0e0e0; }
